@@ -1,0 +1,146 @@
+"use strict";
+// Keyboard keys: [SDL scancode, browser KeyboardEvent.code, display name].
+// VPX stores a keyboard mapping as "Key;<SDL scancode>". Values come from SDL3's SDL_scancode.h.
+const KEYS = [
+  [4, "KeyA", "A"],
+  [5, "KeyB", "B"],
+  [6, "KeyC", "C"],
+  [7, "KeyD", "D"],
+  [8, "KeyE", "E"],
+  [9, "KeyF", "F"],
+  [10, "KeyG", "G"],
+  [11, "KeyH", "H"],
+  [12, "KeyI", "I"],
+  [13, "KeyJ", "J"],
+  [14, "KeyK", "K"],
+  [15, "KeyL", "L"],
+  [16, "KeyM", "M"],
+  [17, "KeyN", "N"],
+  [18, "KeyO", "O"],
+  [19, "KeyP", "P"],
+  [20, "KeyQ", "Q"],
+  [21, "KeyR", "R"],
+  [22, "KeyS", "S"],
+  [23, "KeyT", "T"],
+  [24, "KeyU", "U"],
+  [25, "KeyV", "V"],
+  [26, "KeyW", "W"],
+  [27, "KeyX", "X"],
+  [28, "KeyY", "Y"],
+  [29, "KeyZ", "Z"],
+  [30, "Digit1", "1"],
+  [31, "Digit2", "2"],
+  [32, "Digit3", "3"],
+  [33, "Digit4", "4"],
+  [34, "Digit5", "5"],
+  [35, "Digit6", "6"],
+  [36, "Digit7", "7"],
+  [37, "Digit8", "8"],
+  [38, "Digit9", "9"],
+  [39, "Digit0", "0"],
+  [40, "Enter", "Enter"],
+  [41, "Escape", "Esc"],
+  [42, "Backspace", "Backspace"],
+  [43, "Tab", "Tab"],
+  [44, "Space", "Space"],
+  [45, "Minus", "-"],
+  [46, "Equal", "="],
+  [47, "BracketLeft", "["],
+  [48, "BracketRight", "]"],
+  [49, "Backslash", "\\"],
+  [50, "IntlHash", "# (non-US)"],
+  [51, "Semicolon", ";"],
+  [52, "Quote", "'"],
+  [53, "Backquote", "`"],
+  [54, "Comma", ","],
+  [55, "Period", "."],
+  [56, "Slash", "/"],
+  [57, "CapsLock", "Caps Lock"],
+  [58, "F1", "F1"],
+  [59, "F2", "F2"],
+  [60, "F3", "F3"],
+  [61, "F4", "F4"],
+  [62, "F5", "F5"],
+  [63, "F6", "F6"],
+  [64, "F7", "F7"],
+  [65, "F8", "F8"],
+  [66, "F9", "F9"],
+  [67, "F10", "F10"],
+  [68, "F11", "F11"],
+  [69, "F12", "F12"],
+  [70, "PrintScreen", "Print Screen"],
+  [71, "ScrollLock", "Scroll Lock"],
+  [72, "Pause", "Pause"],
+  [73, "Insert", "Insert"],
+  [74, "Home", "Home"],
+  [75, "PageUp", "Page Up"],
+  [76, "Delete", "Delete"],
+  [77, "End", "End"],
+  [78, "PageDown", "Page Down"],
+  [79, "ArrowRight", "Right Arrow"],
+  [80, "ArrowLeft", "Left Arrow"],
+  [81, "ArrowDown", "Down Arrow"],
+  [82, "ArrowUp", "Up Arrow"],
+  [83, "NumLock", "Num Lock"],
+  [84, "NumpadDivide", "Keypad /"],
+  [85, "NumpadMultiply", "Keypad *"],
+  [86, "NumpadSubtract", "Keypad -"],
+  [87, "NumpadAdd", "Keypad +"],
+  [88, "NumpadEnter", "Keypad Enter"],
+  [89, "Numpad1", "Keypad 1"],
+  [90, "Numpad2", "Keypad 2"],
+  [91, "Numpad3", "Keypad 3"],
+  [92, "Numpad4", "Keypad 4"],
+  [93, "Numpad5", "Keypad 5"],
+  [94, "Numpad6", "Keypad 6"],
+  [95, "Numpad7", "Keypad 7"],
+  [96, "Numpad8", "Keypad 8"],
+  [97, "Numpad9", "Keypad 9"],
+  [98, "Numpad0", "Keypad 0"],
+  [99, "NumpadDecimal", "Keypad ."],
+  [100, "IntlBackslash", "\\ (non-US)"],
+  [101, "ContextMenu", "Menu"],
+  [104, "F13", "F13"],
+  [105, "F14", "F14"],
+  [106, "F15", "F15"],
+  [107, "F16", "F16"],
+  [108, "F17", "F17"],
+  [109, "F18", "F18"],
+  [110, "F19", "F19"],
+  [111, "F20", "F20"],
+  [112, "F21", "F21"],
+  [113, "F22", "F22"],
+  [114, "F23", "F23"],
+  [115, "F24", "F24"],
+  [224, "ControlLeft", "Left Ctrl"],
+  [225, "ShiftLeft", "Left Shift"],
+  [226, "AltLeft", "Left Alt"],
+  [227, "MetaLeft", "Left Meta"],
+  [228, "ControlRight", "Right Ctrl"],
+  [229, "ShiftRight", "Right Shift"],
+  [230, "AltRight", "Right Alt"],
+  [231, "MetaRight", "Right Meta"],
+];
+const KEY_BY_CODE = new Map(KEYS.map(([n, code]) => [code, n]));
+const KEY_NAME = new Map(KEYS.map(([n, , name]) => [n, name]));
+
+// "Key;225 & Key;30 | SDLJoy_...;514;o;-0.3"  ->  "Left Shift + 1  or  Controller input"
+function describeMapping(value) {
+  const v = (value || "").trim();
+  if (!v) return "";
+  return v.split("|").map((alt) => alt.split("&").map((term) => {
+    const t = term.trim();
+    const m = /^Key;(\d+)$/.exec(t);
+    if (m) return KEY_NAME.get(Number(m[1])) || `key ${m[1]}`;
+    return /^SDLJoy_/.test(t) ? "controller input" : t;
+  }).join(" + ")).join("  or  ");
+}
+
+// The mapping with its keyboard key set to `scancode`. Only the first single-key alternative ("Key;<n>") is replaced;
+// alternatives for other devices and key combinations are kept as they are. No keyboard alternative yet: one is added first.
+function withKey(value, scancode) {
+  const alternatives = (value || "").split("|").map((a) => a.trim()).filter((a) => a !== "");
+  const i = alternatives.findIndex((a) => /^Key;\d+$/.test(a));
+  if (i >= 0) alternatives[i] = `Key;${scancode}`; else alternatives.unshift(`Key;${scancode}`);
+  return alternatives.join(" | ");
+}

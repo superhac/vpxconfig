@@ -1,0 +1,52 @@
+interface: 'zxdg_output_manager_v1',                     version:  3, name:  9
+	xdg_output_v1
+		output: 112
+		name: 'DP-2'
+		description: 'LG Electronics LG HDR 4K 0x00025EAC (DP-2)'
+		logical_x: 0, logical_y: 0
+		logical_width: 3840, logical_height: 2160
+	xdg_output_v1
+		output: 99
+		name: 'HDMI-A-1'
+		description: 'Audio Processing Technology  Ltd HDMI  (HDMI-A-1)'
+		logical_x: 5760, logical_y: 0
+		logical_width: 1920, logical_height: 1080
+	xdg_output_v1
+		output: 69
+		name: 'DP-3'
+		description: 'Ancor Communications Inc VS278 G7LMQS077266 (DP-3)'
+		logical_x: 3840, logical_y: 0
+		logical_width: 1920, logical_height: 1080
+interface: 'zwlr_output_power_manager_v1',               version:  1, name: 23
+interface: 'zwlr_output_manager_v1',                     version:  4, name: 31
+interface: 'ext_output_image_capture_source_manager_v1', version:  1, name: 60
+interface: 'wl_output',                                  version:  4, name: 69
+	name: DP-3
+	description: Ancor Communications Inc VS278 G7LMQS077266 (DP-3)
+	x: 0, y: 0, scale: 1,
+	physical_width: 600 mm, physical_height: 340 mm,
+	make: 'Ancor Communications Inc', model: 'VS278',
+	subpixel_orientation: unknown, output_transform: normal,
+	mode:
+		width: 1920 px, height: 1080 px, refresh: 60.000 Hz,
+		flags: current
+interface: 'wl_output',                                  version:  4, name: 99
+	name: HDMI-A-1
+	description: Audio Processing Technology  Ltd HDMI  (HDMI-A-1)
+	x: 0, y: 0, scale: 1,
+	physical_width: 0 mm, physical_height: 0 mm,
+	make: 'Audio Processing Technology  Ltd', model: 'HDMI',
+	subpixel_orientation: unknown, output_transform: normal,
+	mode:
+		width: 1920 px, height: 1080 px, refresh: 60.000 Hz,
+		flags: current
+interface: 'wl_output',                                  version:  4, name: 112
+	name: DP-2
+	description: LG Electronics LG HDR 4K 0x00025EAC (DP-2)
+	x: 0, y: 0, scale: 1,
+	physical_width: 600 mm, physical_height: 340 mm,
+	make: 'LG Electronics', model: 'LG HDR 4K',
+	subpixel_orientation: unknown, output_transform: normal,
+	mode:
+		width: 3840 px, height: 2160 px, refresh: 59.997 Hz,
+		flags: current
