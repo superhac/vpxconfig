@@ -9,19 +9,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import fs, system
+from . import __version__, fs, paths, system
 from .generate import generate
 from .inputs import dynamic_input_groups
 from .ini import IniDocument
 from .settings import validate
 from .steps import all_fields, build_steps
 
-ROOT = Path(__file__).resolve().parent.parent
-WEB = ROOT / "web"
-TEMPLATE = ROOT / "VPinballX.ini"       # wizard definition and default base, never modified
+WEB = paths.resource_dir() / "web"
+TEMPLATE = paths.resource_dir() / "VPinballX.ini"       # wizard definition and default base, never modified
 # Where VPX keeps its settings on Linux (VPX 10.8+ uses a folder per minor version). The wizard writes here unless told otherwise.
 DEFAULT_OUTPUT_PARTS = (".local", "share", "VPinballX", "10.8", "VPinballX.ini")
-STATE = ROOT / "state.json"             # wizard answers, so a restart keeps them
+STATE = paths.state_path()             # wizard answers, so a restart keeps them
 API_HEADER = "X-VPX-Config"             # required on writes: forces a CORS preflight from other sites
 
 
@@ -158,6 +157,7 @@ class App:
                            "default_path": str(self.default_output_path)}}
 
     def _persist(self):
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(json.dumps({**self.state, "base_path": self.base_path, "base_backup": self.base_backup,
                                               "output_path": self.output_override}, indent=2))
 
@@ -175,7 +175,7 @@ class App:
             return self.public_state()
 
     def info(self):
-        return {"template": self.template_path.name, "output": self.output_path.name}
+        return {"template": self.template_path.name, "output": self.output_path.name, "version": __version__}
 
     def update_state(self, body):
         with self.lock:
@@ -307,7 +307,8 @@ def serve(host="127.0.0.1", port=1111):
     loopback = host in ("127.0.0.1", "localhost", "::1")
     allowed = {f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}"} if loopback else None
     httpd = ThreadingHTTPServer((host, port), make_handler(app, allowed))
-    print(f"VPinConfig: http://localhost:{port}   (base: {app.template_path.name}, writes to: {app.output_path})")
+    print(f"VPinConfig {__version__}: http://localhost:{port}   (base: {app.template_path.name}, writes to: {app.output_path}, "
+          f"answers kept in: {app.state_path})")
     if not loopback:
         print("WARNING: listening on a non-loopback address; anyone on the network can browse this machine's folders and change the output file.")
     try:

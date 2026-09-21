@@ -1,0 +1,112 @@
+name: Release
+
+# Two ways to run this:
+#   * Push a tag such as v0.5 (it must match __version__ in vpinconfig/__init__.py): builds, tests and publishes a release.
+#   * Run it by hand from the Actions tab ("Run workflow"): type the version to build. It builds and tests the
+#     executable for that version (the code's own version is replaced for this run only), and publishes a release
+#     v<version> only if "Publish" is ticked (the tag is then created on the commit that was run).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, for example 0.5 or 0.5.1"
+        required: true
+        type: string
+      publish:
+        description: "Also publish a GitHub release v<version> (creates that tag on this commit)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (Linux x86_64)
+    runs-on: ubuntu-22.04   # an older glibc, so the executable also runs on older distributions
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag run must match the version in the code. A manual run puts the typed version into the code for this run.
+      # The typed text reaches the shell only as an environment variable, and set_version.py validates it.
+      - name: Work out the version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            python tools/set_version.py "$INPUT_VERSION"
+          else
+            python tools/check_version.py "$GITHUB_REF_NAME"
+          fi
+          VERSION=$(python -c "import vpinconfig; print(vpinconfig.__version__)")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building VPinConfig $VERSION"
+
+      - name: Stop early if that release already exists
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::The release $TAG already exists. Choose another version, or untick Publish."
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests
+
+      - name: Build the executable
+        run: bash tools/build.sh
+
+      - name: Smoke test the executable
+        env:
+          EXPECTED_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          bash tools/smoke_test_exe.sh dist/vpinconfig
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vpinconfig-linux-x86_64
+          path: |
+            dist/vpinconfig
+            dist/vpinconfig.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the release (and the tag, for a manual run)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vpinconfig-linux-x86_64
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          TARGET=()
+          if [ "$EVENT" = "workflow_dispatch" ]; then TARGET=(--target "$GITHUB_SHA"); fi   # a manual run creates the tag
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "VPinConfig $TAG" \
+            --generate-notes \
+            "${TARGET[@]}"

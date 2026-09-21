@@ -1,0 +1,2 @@
+# Only needed to build the one-file executable (see tools/build.sh). The app itself uses the Python standard library only.
+pyinstaller>=6.10,<7

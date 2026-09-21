@@ -376,6 +376,7 @@ async function render() {
 async function init() {
   const [s, st] = await Promise.all([api.get("/api/steps"), api.get("/api/state")]);
   app.steps = s.steps; app.output = st.output;
+  $(".brand small").textContent = `Visual Pinball X · v${s.version}`;
   app.values = st.values; app.base = st.base;
   renderFoot();
   await loadDisplays();

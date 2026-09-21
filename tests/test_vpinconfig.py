@@ -1,7 +1,9 @@
+import importlib.util
 import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -933,6 +935,164 @@ class OutputApiTests(unittest.TestCase):
         code, r = self.call("GET", f"/api/fs?path={self.dir}/no/such/folder&nearest=1")
         self.assertEqual((code, r["path"]), (200, str(self.dir)))
         self.assertEqual(self.call("GET", f"/api/fs?path={self.dir}/no/such/folder")[0], 400)
+
+
+class ReleaseTests(unittest.TestCase):
+    """Versioning, the one-file executable's file locations, and the release tooling."""
+
+    ROOT = HERE.parent
+
+    def run_tool(self, *args):
+        return subprocess.run([sys.executable, str(self.ROOT / "tools" / "check_version.py"), *args], capture_output=True, text=True)
+
+    def test_the_version_looks_like_0_5_or_0_5_1(self):
+        import vpinconfig
+        self.assertRegex(vpinconfig.__version__, r"^\d+\.\d+(\.\d+)?$")
+
+    def test_the_version_is_shown_on_the_command_line_and_by_the_api(self):
+        import vpinconfig
+        out = subprocess.run([sys.executable, str(self.ROOT / "run.py"), "--version"], capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, f"VPinConfig {vpinconfig.__version__}"))
+        app = server.App(TEMPLATE, None, Path(tempfile.mkdtemp()) / "s.json")
+        self.assertEqual(app.info()["version"], vpinconfig.__version__)
+
+    def test_the_web_page_shows_the_version(self):
+        self.assertIn("v${s.version}", (self.ROOT / "web" / "app.js").read_text())
+
+    def test_the_tag_check(self):
+        import vpinconfig
+        v = vpinconfig.__version__
+        ok = self.run_tool(f"v{v}")
+        self.assertEqual((ok.returncode, "matches" in ok.stdout), (0, True))
+        for bad in (f"v{v}.1", v, f"V{v}", f"v.{v}", "v99.99"):
+            r = self.run_tool(bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertIn(f"expected v{v}", r.stderr)
+        self.assertNotEqual(self.run_tool().returncode, 0)                       # no tag given
+
+    def test_paths_from_source_use_the_project_folder(self):
+        from vpinconfig import paths
+        self.assertFalse(paths.frozen())
+        self.assertEqual(paths.resource_dir(), paths.PROJECT)
+        self.assertEqual(paths.state_path(), paths.PROJECT / "state.json")
+
+    def test_paths_in_the_executable(self):
+        """Bundled files come from PyInstaller's unpack folder; the state goes to the config folder, which survives runs."""
+        from unittest import mock
+        from vpinconfig import paths
+        bundle = self.ROOT / "web"
+        with mock.patch.object(sys, "frozen", True, create=True), mock.patch.object(sys, "_MEIPASS", str(bundle), create=True):
+            self.assertEqual(paths.resource_dir(), bundle)
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/somewhere/config"}):
+                self.assertEqual(paths.state_path(), Path("/somewhere/config/vpinconfig/state.json"))
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/is/ignored"}):
+                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpinconfig" / "state.json")
+            env = {k: v for k, v in os.environ.items() if k != "XDG_CONFIG_HOME"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpinconfig" / "state.json")
+
+    def test_the_state_folder_is_created_when_needed(self):
+        state = Path(tempfile.mkdtemp()) / "config" / "vpinconfig" / "state.json"      # neither folder exists yet
+        app = server.App(TEMPLATE, None, state)
+        app.update_state({"values": {"Player.BGSet": "1"}})
+        self.assertEqual(json.loads(state.read_text())["values"]["Player.BGSet"], "1")
+
+
+    def load_tool(self, name):
+        spec = importlib.util.spec_from_file_location(name, self.ROOT / "tools" / f"{name}.py")
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+        return tool
+
+    def test_set_version_accepts_only_real_versions(self):
+        tool = self.load_tool("set_version")
+        for text, want in (("0.6", "0.6"), ("v0.6", "0.6"), (" 1.2.3 ", "1.2.3"), ("v10.20", "10.20")):
+            self.assertEqual(tool.normalise(text), want)
+        for bad in ("", "v", "0", "0.", "v.0.6", "0.6-rc1", "0.6.1.2", "abc", "0.6; rm -rf /", "$(id)", "0.6\n1.0"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                tool.normalise(bad)
+
+    def test_set_version_rewrites_only_the_version_line(self):
+        tool = self.load_tool("set_version")
+        source = (self.ROOT / "vpinconfig" / "__init__.py").read_text()
+        new = tool.with_version(source, "0.6")
+        self.assertIn('__version__ = "0.6"', new)
+        self.assertEqual(len(new.splitlines()), len(source.splitlines()))
+        with self.assertRaises(ValueError):
+            tool.with_version("nothing here", "0.6")
+
+    def test_set_version_command_line(self):
+        target = Path(tempfile.mkdtemp()) / "__init__.py"
+        target.write_text('"""doc"""\n__version__ = "0.5"\n')
+        run = lambda *a: subprocess.run([sys.executable, str(self.ROOT / "tools" / "set_version.py"), *a], capture_output=True, text=True)
+        self.assertEqual(run("v0.7", str(target)).returncode, 0)
+        self.assertEqual(target.read_text(), '"""doc"""\n__version__ = "0.7"\n')
+        bad = run("not-a-version", str(target))
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("is not a version", bad.stderr)
+        self.assertEqual(target.read_text(), '"""doc"""\n__version__ = "0.7"\n')       # unchanged after a bad input
+        self.assertNotEqual(run().returncode, 0)
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_the_manual_run_asks_for_a_version(self):
+        import yaml
+        wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
+        inputs = wf.get("on", wf.get(True))["workflow_dispatch"]["inputs"]
+        self.assertEqual((inputs["version"]["required"], inputs["version"]["type"]), (True, "string"))
+        self.assertEqual((inputs["publish"]["type"], inputs["publish"]["default"]), ("boolean", False))   # off unless ticked
+        # the typed version reaches the shell only through an environment variable, never pasted into a script
+        for job in wf["jobs"].values():
+            for step in job["steps"]:
+                self.assertNotIn("inputs.", step.get("run", ""), step.get("name"))
+        text = (self.ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn("tools/set_version.py", text)
+        release = wf["jobs"]["release"]
+        self.assertIn("inputs.publish", release["if"])                    # a manual run publishes only when asked
+        self.assertIn("refs/tags/", release["if"])
+
+    def test_the_spec_bundles_what_the_app_reads_at_runtime(self):
+        spec = (self.ROOT / "vpinconfig.spec").read_text()
+        self.assertIn('("web", "web")', spec)
+        self.assertIn('("VPinballX.ini", ".")', spec)
+        self.assertIn('["run.py"]', spec)
+        self.assertTrue((self.ROOT / "web").is_dir() and (self.ROOT / "VPinballX.ini").is_file())
+        self.assertIn("pyinstaller", (self.ROOT / "requirements-build.txt").read_text().lower())
+
+    def test_the_executable_is_simply_called_vpinconfig(self):
+        """Linux x86_64 only, and the version is in the release and in --version, so the file name carries neither."""
+        build = (self.ROOT / "tools" / "build.sh").read_text()
+        self.assertNotIn("linux-", build)
+        self.assertNotIn("${VERSION}", build)
+        self.assertIn("sha256sum vpinconfig > vpinconfig.sha256", build)
+        self.assertIn('name="vpinconfig"', (self.ROOT / "vpinconfig.spec").read_text().replace("\n    ", " "))
+        for name in ("release.yml",):
+            text = (self.ROOT / ".github" / "workflows" / name).read_text()
+            self.assertIn("dist/vpinconfig", text)
+            self.assertNotIn("linux-x86_64 ", text.replace("vpinconfig-linux-x86_64", ""))   # no platform suffix on the file itself
+            self.assertNotIn("vpinconfig-v", text)
+
+    def test_the_build_uses_a_virtual_environment_not_the_system_python(self):
+        build = (self.ROOT / "tools" / "build.sh").read_text()
+        self.assertIn("-m venv .venv", build)
+        self.assertIn(".venv/bin/python -m pip install", build)
+        self.assertIn(".venv/", (self.ROOT / ".gitignore").read_text())
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_the_release_workflow(self):
+        import yaml
+        wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
+        triggers = wf.get("on", wf.get(True))
+        self.assertEqual(triggers["push"]["tags"], ["v*"])
+        self.assertIn("workflow_dispatch", triggers)
+        build, release = wf["jobs"]["build"], wf["jobs"]["release"]
+        commands = " ".join(step.get("run", "") for step in build["steps"])
+        for needed in ("check_version.py", "unittest discover", "tools/build.sh", "smoke_test_exe.sh"):
+            self.assertIn(needed, commands)
+        self.assertEqual(release["needs"], "build")
+        self.assertIn("refs/tags/", release["if"])                       # only tags publish; a manual run just builds
+        self.assertEqual(release["permissions"], {"contents": "write"})
+        self.assertEqual(wf["permissions"], {"contents": "read"})        # least privilege everywhere else
+        self.assertIn("gh release create", " ".join(step.get("run", "") for step in release["steps"]))
 
 
 class FolderListingTests(unittest.TestCase):
