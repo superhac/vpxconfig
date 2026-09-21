@@ -1385,6 +1385,69 @@ class SystemTests(unittest.TestCase):
         self.assertIn("What was tried", js)
         self.assertIn("displayDiagnostics", js)
 
+    # ---- the value VPX writes for a display: "<name> [x, y]" (Window.cpp: std::format("{} [{}, {}]", name, x, y)) -------------
+
+    WESTON_LIKE = """interface: 'wl_output', version: 4, name: 20
+\tname: HDMI-A-1
+\tdescription: LG HDR 4K
+\tx: 1920, y: 0, scale: 1,
+\tphysical_width: 600 mm, physical_height: 340 mm,
+\tmake: 'LG Electronics', model: 'LG HDR 4K',
+\tmode:
+\t\twidth: 3840 px, height: 2160 px, refresh: 60.000 Hz,
+\t\tflags: current
+interface: 'wl_output', version: 4, name: 21
+\tname: DP-1
+\tdescription: VS278
+\tx: 0, y: 0, scale: 1,
+\tmake: 'Ancor Communications Inc', model: 'VS278',
+\tmode:
+\t\twidth: 1920 px, height: 1080 px, refresh: 60.000 Hz,
+\t\tflags: current
+interface: 'zxdg_output_manager_v1', version: 3, name: 9
+\txdg_output_v1
+\t\toutput: 20
+\t\tname: 'HDMI-A-1'
+\t\tdescription: 'LG HDR 4K'
+\t\tlogical_x: 1920, logical_y: 0
+\t\tlogical_width: 1920, logical_height: 1080
+\txdg_output_v1
+\t\toutput: 21
+\t\tname: 'DP-1'
+\t\tdescription: 'VS278'
+\t\tlogical_x: 0, logical_y: 0
+\t\tlogical_width: 1920, logical_height: 1080
+"""
+
+    def test_the_display_id_is_the_name_and_the_position(self):
+        self.assertEqual(system.display_id("LG HDR 4K", 1920, 0), "LG HDR 4K [1920, 0]")          # the user's playfield
+        self.assertEqual(system.display_id("VS278", 0, 0), "VS278 [0, 0]")                          # the user's backglass
+        self.assertEqual(system.display_id("Left", -1920, -200), "Left [-1920, -200]")             # a monitor left of / above the origin
+
+    def test_ids_from_a_weston_like_output(self):
+        outs = system.parse_wayland_outputs(self.WESTON_LIKE)
+        self.assertEqual([o["id"] for o in outs], ["VS278 [0, 0]", "LG HDR 4K [1920, 0]"])       # sorted by position
+        self.assertEqual([o["description"] for o in outs], ["VS278", "LG HDR 4K"])
+        by_name = {o["name"]: o for o in outs}
+        self.assertEqual((by_name["HDMI-A-1"]["width"], by_name["HDMI-A-1"]["height"]), (1920, 1080))   # the logical size
+
+    def test_the_layout_position_wins_over_the_wl_output_geometry_line(self):
+        outs = {o["name"]: o for o in system.parse_wayland_outputs((HERE / "wayland_info_output.txt").read_text())}
+        self.assertEqual(outs["DP-3"]["id"], "Ancor Communications Inc VS278 G7LMQS077266 (DP-3) [3840, 0]")   # not [0, 0] from wl_output
+        self.assertEqual(outs["HDMI-A-1"]["id"], "Audio Processing Technology  Ltd HDMI  (HDMI-A-1) [5760, 0]")
+        self.assertEqual(outs["DP-2"]["id"], "LG Electronics LG HDR 4K 0x00025EAC (DP-2) [0, 0]")
+
+    def test_without_an_xdg_output_the_wl_output_position_is_used(self):
+        only_wl = self.WESTON_LIKE.split("interface: 'zxdg_output_manager_v1'")[0]
+        self.assertEqual([o["id"] for o in system.parse_wayland_outputs(only_wl)], ["VS278 [0, 0]", "LG HDR 4K [1920, 0]"])
+
+    def test_the_page_stores_the_id_and_recognises_older_values(self):
+        js = (HERE.parent / "web" / "app.js").read_text()
+        self.assertIn("value: m.id, selected: m.id === v", js)                     # the dropdown stores "<name> [x, y]"
+        self.assertIn("const looseMon", js)                                         # same monitor without position / at another position
+        self.assertIn("position or format differs", js)
+        self.assertNotIn("value: m.description", js)
+
     def test_missing_command_is_reported_not_raised(self):
         r = system.run(["definitely-not-a-real-command"])
         self.assertFalse(r["ok"])

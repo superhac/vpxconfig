@@ -46,7 +46,11 @@ async function loadDisplays() {
   app.displayDiagnostics = r.diagnostics || null;
   app.displayCommand = r.command || "wayland-info -i output";
 }
-const findMon = (desc) => (app.displays || []).find((m) => m.description === desc);
+// A Display value is "<name> [x, y]" (what VPX writes and compares exactly). findMon needs that exact string; looseMon also
+// recognises the same monitor written without the position (older files) or at another position (it was moved).
+const findMon = (value) => (app.displays || []).find((m) => m.id === value);
+const withoutPosition = (value) => value.replace(/\s*\[-?\d+,\s*-?\d+\]\s*$/, "");
+const looseMon = (value) => findMon(value) || (app.displays || []).find((m) => m.description === withoutPosition(value));
 
 // ---- sidebar -----------------------------------------------------------------------------
 
@@ -156,7 +160,7 @@ function fillFields(ids, vals) {
 }
 // Display fields: a dropdown filled from the live monitor detection (never from a saved ini).
 const shortDesc = (m) => m.description.replace(/\s*\([^)]*\)$/, "");
-const monLabel = (m) => `${m.name} — ${shortDesc(m)}` + (m.width ? ` · ${m.width}×${m.height}` : "");
+const monLabel = (m) => `${m.name} — ${shortDesc(m)}` + (m.width ? ` · ${m.width}×${m.height}` : "") + ` at [${m.x}, ${m.y}]`;
 
 function displayInfo(f, step) {
   const value = (app.values[f.id] || "").trim();
@@ -167,8 +171,12 @@ function displayInfo(f, step) {
       box.append(h("details", { class: "diag" }, h("summary", {}, "What was tried"),
         h("pre", {}, JSON.stringify(app.displayDiagnostics, null, 2))));
   }
-  else if (value && !findMon(value))
-    box.append(h("span", { class: "warn" }, "This display is not connected to this system right now."));
+  else if (value && !findMon(value)) {
+    const same = looseMon(value);
+    box.append(h("span", { class: "warn" }, same
+      ? `This monitor is now "${same.id}" (VPX matches the whole text, including the position). Pick it from the list to update.`
+      : "This display is not connected to this system right now."));
+  }
   return box;
 }
 
@@ -186,8 +194,8 @@ function displayControl(f, step, v) {
   if (detected.length) {
     input = h("select", { id: f.id, onchange },
       h("option", { value: "" }, "Default (VPX chooses)"),
-      detected.map((m) => h("option", { value: m.description, selected: m.description === v }, monLabel(m))),
-      v && !findMon(v) ? h("option", { value: v, selected: true }, `${v} (not connected)`) : null);
+      detected.map((m) => h("option", { value: m.id, selected: m.id === v }, monLabel(m))),
+      v && !findMon(v) ? h("option", { value: v, selected: true }, `${v} (${looseMon(v) ? "position or format differs" : "not connected"})`) : null);
   } else {
     input = h("input", { id: f.id, type: "text", value: v, placeholder: "Default display", oninput: onchange });
   }

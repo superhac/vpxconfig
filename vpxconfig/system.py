@@ -74,7 +74,10 @@ def _parse_details(text):
         elif m := re.match(r"description: '?(.+?)'?$", s):
             entry(target["name"])["description"] = m[1]
         elif m := re.match(r"logical_x: (-?\d+), logical_y: (-?\d+)", s):
-            entry(target["name"]).update(x=int(m[1]), y=int(m[2]))
+            entry(target["name"]).update(x=int(m[1]), y=int(m[2]), _logical=True)
+        elif m := re.match(r"x: (-?\d+), y: (-?\d+)", s):                # wl_output geometry: used when there is no logical position
+            if not entry(target["name"]).get("_logical"):
+                entry(target["name"]).update(x=int(m[1]), y=int(m[2]))
         elif m := re.match(r"logical_width: (\d+), logical_height: (\d+)", s):
             entry(target["name"]).update(width=int(m[1]), height=int(m[2]))
         elif m := re.match(r"physical_width: (\d+) mm, physical_height: (\d+) mm", s):
@@ -85,21 +88,30 @@ def _parse_details(text):
             entry(target["name"])["refresh_hz"] = target["refresh"]
             entry(target["name"])["_mode"] = target["mode"]
     for o in outputs.values():                     # no xdg_output block: use the size of the current mode
+        o.pop("_logical", None)
         mode = o.pop("_mode", None)
         if mode and not o["width"]:
             o["width"], o["height"] = mode
     return outputs
 
 
+def display_id(description, x, y):
+    """What VPX writes in PlayfieldDisplay, BackglassDisplay, ...: "<display name> [x, y]", with the display's logical
+    position in the desktop layout (Window.cpp: std::format("{} [{}, {}]", name, bounds.x, bounds.y)). VPX compares the
+    setting to this string exactly, so a value without the position matches nothing."""
+    return f"{description} [{x}, {y}]"
+
+
 def parse_wayland_outputs(text):
     """Monitors reported by `wayland-info -i output`, one dict each.
 
-    The list itself is exactly what `grep -oP "description: '\\K[^']+"` prints: VPX stores the monitor
-    *description* (e.g. 'LG Electronics LG HDR 4K 0x00025EAC (DP-2)') in the *Display keys. Size and
-    position are added when the output has them, but never decide which monitors exist.
+    The list itself is exactly what `grep -oP "description: '\\K[^']+"` prints (e.g. 'LG Electronics LG HDR 4K
+    0x00025EAC (DP-2)'); size and position are added when the output has them but never decide which monitors exist.
+    `id` is the value for the *Display keys: the description plus the logical position, "LG HDR 4K [1920, 0]".
     """
     details = list(_parse_details(text).values())
     monitors = []
+    add_id = lambda m: {**m, "id": display_id(m["description"], m["x"], m["y"])}
     descriptions = re.findall(r"description: '([^']+)'", text)
     if not descriptions:                           # older wayland-info builds print them unquoted (wl_output blocks)
         descriptions = re.findall(r"^\s*description: (.+?)\s*$", text, re.M)
@@ -109,7 +121,7 @@ def parse_wayland_outputs(text):
             name = re.search(r"\(([^()]+)\)\s*$", desc)
             m = {"name": name[1] if name else desc, "description": desc, "x": 0, "y": 0, "width": 0, "height": 0,
                  "physical_width_mm": 0, "physical_height_mm": 0, "refresh_hz": 0.0}
-        monitors.append(m)
+        monitors.append(add_id(m))
     return sorted(monitors, key=lambda o: (o["x"], o["y"]))
 
 
