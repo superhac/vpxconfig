@@ -1446,7 +1446,77 @@ interface: 'zxdg_output_manager_v1', version: 3, name: 9
         self.assertIn("value: m.id, selected: m.id === v", js)                     # the dropdown stores "<name> [x, y]"
         self.assertIn("const looseMon", js)                                         # same monitor without position / at another position
         self.assertIn("position or format differs", js)
+        self.assertIn("m.name_source", js)                                         # says where SDL's name came from
         self.assertNotIn("value: m.description", js)
+
+    # ---- the display name is chosen like SDL 3.4 does (SDL_waylandvideo.c), because VPX takes it from SDL_GetDisplayName ----
+
+    @staticmethod
+    def one_monitor(version, wl_desc=None, xdg_desc=None, model="MODEL", xdg_pos=(1920, 0), wl_pos=(100, 50), global_id=20):
+        """wayland-info -i output text for one monitor: wl_output (advertised `version`) + optional xdg_output block."""
+        lines = [f"interface: 'wl_output', version: {version}, name: {global_id}"]
+        if version >= 4:
+            lines.append("\tname: DP-9")
+            if wl_desc:
+                lines.append(f"\tdescription: {wl_desc}")
+        lines += [f"\tx: {wl_pos[0]}, y: {wl_pos[1]}, scale: 1,", f"\tmake: 'Maker', model: '{model}',", "\tmode:",
+                  "\t\twidth: 1920 px, height: 1080 px, refresh: 60.000 Hz,", "\t\tflags: current"]
+        if xdg_pos is not None or xdg_desc:
+            lines += ["interface: 'zxdg_output_manager_v1', version: 3, name: 9", "\txdg_output_v1", f"\t\toutput: {global_id}",
+                      "\t\tname: 'DP-9'"]
+            if xdg_desc:
+                lines.append(f"\t\tdescription: '{xdg_desc}'")
+            if xdg_pos is not None:
+                lines += [f"\t\tlogical_x: {xdg_pos[0]}, logical_y: {xdg_pos[1]}", "\t\tlogical_width: 1920, logical_height: 1080"]
+        return "\n".join(lines) + "\n"
+
+    def name_of(self, text):
+        (m,) = system.parse_wayland_outputs(text)
+        return m["description"], m["name_source"]
+
+    def test_wl_output_v4_uses_the_wl_output_description_and_ignores_the_xdg_one(self):
+        self.assertEqual(self.name_of(self.one_monitor(4, wl_desc="WL Desc", xdg_desc="XDG Desc")), ("WL Desc", "wl_output description"))
+
+    def test_wl_output_v4_without_a_description_falls_back_to_the_model_even_if_xdg_has_one(self):
+        """SDL: the xdg_output description is "deprecated as of wl_output v4" and is not used then."""
+        self.assertEqual(self.name_of(self.one_monitor(4, xdg_desc="XDG Desc", model="LG HDR 4K")), ("LG HDR 4K", "wl_output model"))
+
+    def test_older_wl_output_uses_the_xdg_output_description(self):
+        self.assertEqual(self.name_of(self.one_monitor(3, xdg_desc="XDG Desc")), ("XDG Desc", "xdg_output description"))
+        self.assertEqual(self.name_of(self.one_monitor(2, xdg_desc="XDG Desc")), ("XDG Desc", "xdg_output description"))
+
+    def test_older_wl_output_without_xdg_uses_the_model(self):
+        self.assertEqual(self.name_of(self.one_monitor(3, xdg_pos=None, model="VS278")), ("VS278", "wl_output model"))
+
+    def test_nothing_but_a_model(self):
+        self.assertEqual(self.name_of(self.one_monitor(4, xdg_pos=None, model="VS278")), ("VS278", "wl_output model"))
+
+    def test_the_position_is_the_layout_position_or_else_the_wl_output_geometry(self):
+        with_xdg = system.parse_wayland_outputs(self.one_monitor(4, wl_desc="A", xdg_pos=(1920, 0), wl_pos=(100, 50)))[0]
+        self.assertEqual((with_xdg["x"], with_xdg["y"], with_xdg["id"]), (1920, 0, "A [1920, 0]"))
+        without = system.parse_wayland_outputs(self.one_monitor(4, wl_desc="A", xdg_pos=None, wl_pos=(100, 50)))[0]
+        self.assertEqual((without["x"], without["y"], without["id"]), (100, 50, "A [100, 50]"))
+
+    def test_an_old_wl_output_without_a_name_line_is_still_a_monitor(self):
+        """wl_output before v4 has no `name:` line; its xdg_output block (tied by `output: <id>`) supplies the connector name."""
+        (m,) = system.parse_wayland_outputs(self.one_monitor(3, xdg_desc="XDG Desc"))
+        self.assertEqual((m["name"], m["wl_output_version"], m["width"], m["height"]), ("DP-9", 3, 1920, 1080))
+        (bare,) = system.parse_wayland_outputs(self.one_monitor(3, xdg_pos=None))
+        self.assertEqual(bare["name"], "output-20")                                   # nothing names it: a stable placeholder
+
+    def test_two_monitors_are_kept_apart(self):
+        text = self.one_monitor(4, wl_desc="First", xdg_pos=(0, 0), global_id=20) + self.one_monitor(4, wl_desc="Second", xdg_pos=(1920, 0), global_id=21)
+        self.assertEqual([m["id"] for m in system.parse_wayland_outputs(text)], ["First [0, 0]", "Second [1920, 0]"])
+
+    def test_the_hyprland_sample_uses_the_wl_output_description(self):
+        outs = system.parse_wayland_outputs((HERE / "wayland_info_output.txt").read_text())
+        self.assertEqual({m["name_source"] for m in outs}, {"wl_output description"})
+        self.assertEqual({m["wl_output_version"] for m in outs}, {4})
+
+    def test_the_sdl_rule_is_documented_with_its_source(self):
+        doc = system.sdl_display_name.__doc__
+        self.assertIn("SDL_waylandvideo.c", doc)
+        self.assertIn("deprecated as of wl_output v4", doc)
 
     def test_missing_command_is_reported_not_raised(self):
         r = system.run(["definitely-not-a-real-command"])

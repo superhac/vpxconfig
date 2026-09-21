@@ -47,52 +47,95 @@ def run(argv, display=None):
 
 
 def _parse_details(text):
-    """Best-effort geometry per monitor from `wayland-info -i output`, keyed by connector name."""
-    outputs, xdg, wl = {}, None, None
+    """Everything `wayland-info -i output` says about each monitor, keyed by the compositor's global id.
 
-    def entry(name):
-        return outputs.setdefault(name, {"name": name, "description": "", "x": 0, "y": 0, "width": 0,
-                                         "height": 0, "physical_width_mm": 0, "physical_height_mm": 0,
-                                         "refresh_hz": 0.0})
+    The wl_output block (advertised version, description, geometry make/model/position, modes) and the xdg_output block
+    (name, description, logical position/size; tied to it by its `output: <id>` line) of one monitor are merged.
+    """
+    outputs, names = {}, {}
+    cur = None                                             # ("wl" | "xdg", key) of the block being read
+
+    def entry(key):
+        return outputs.setdefault(key, {"name": f"output-{key}", "description": "", "x": 0, "y": 0, "width": 0, "height": 0,
+                                        "physical_width_mm": 0, "physical_height_mm": 0, "refresh_hz": 0.0,
+                                        "_wl_version": None, "_wl_description": "", "_xdg_description": "", "_model": "",
+                                        "_make": ""})
 
     for line in text.splitlines():
         s = line.strip()
         if line.startswith("interface:"):
-            xdg, wl = None, ({} if "'wl_output'" in line else None)
+            cur = None
+            if "'wl_output'" in line:
+                m = re.search(r"version:\s*(\d+).*?name:\s*(\d+)", line)
+                key = m[2] if m else f"wl{len(outputs)}"
+                entry(key)["_wl_version"] = int(m[1]) if m else None
+                cur = ("wl", key)
             continue
         if s == "xdg_output_v1":
-            xdg = {}
+            cur = ("xdg", None)
             continue
-        target = xdg if xdg is not None else wl
-        if target is None:
+        if cur is None:
             continue
+        kind, key = cur
+        if kind == "xdg" and key is None:
+            if m := re.match(r"output: (\d+)", s):
+                cur = ("xdg", m[1])
+                entry(m[1])
+                continue
+            if m := re.match(r"name: '?(.+?)'?$", s):      # no `output:` line: find the monitor by its connector name
+                cur = ("xdg", names.get(m[1]) or m[1])
+                entry(cur[1])["name"] = m[1]
+            else:
+                continue
+            key = cur[1]
+        e = entry(key)
         if m := re.match(r"name: '?(.+?)'?$", s):
-            target["name"] = m[1]
-            entry(m[1])
-        elif "name" not in target:
-            continue
+            e["name"] = m[1]
+            names[m[1]] = key
         elif m := re.match(r"description: '?(.+?)'?$", s):
-            entry(target["name"])["description"] = m[1]
+            e["_xdg_description" if kind == "xdg" else "_wl_description"] = m[1]
+        elif s.startswith("make:") and (m := re.search(r"make: '([^']*)', model: '([^']*)'", s)):
+            e["_make"], e["_model"] = m[1], m[2]
         elif m := re.match(r"logical_x: (-?\d+), logical_y: (-?\d+)", s):
-            entry(target["name"]).update(x=int(m[1]), y=int(m[2]), _logical=True)
+            e.update(x=int(m[1]), y=int(m[2]), _logical=True)
         elif m := re.match(r"x: (-?\d+), y: (-?\d+)", s):                # wl_output geometry: used when there is no logical position
-            if not entry(target["name"]).get("_logical"):
-                entry(target["name"]).update(x=int(m[1]), y=int(m[2]))
+            if not e.get("_logical"):
+                e.update(x=int(m[1]), y=int(m[2]))
         elif m := re.match(r"logical_width: (\d+), logical_height: (\d+)", s):
-            entry(target["name"]).update(width=int(m[1]), height=int(m[2]))
+            e.update(width=int(m[1]), height=int(m[2]))
         elif m := re.match(r"physical_width: (\d+) mm, physical_height: (\d+) mm", s):
-            entry(target["name"]).update(physical_width_mm=int(m[1]), physical_height_mm=int(m[2]))
+            e.update(physical_width_mm=int(m[1]), physical_height_mm=int(m[2]))
         elif m := re.match(r"width: (\d+) px, height: (\d+) px, refresh: ([\d.]+) Hz", s):
-            target["refresh"], target["mode"] = float(m[3]), (int(m[1]), int(m[2]))
-        elif s.startswith("flags:") and "current" in s and "refresh" in target:
-            entry(target["name"])["refresh_hz"] = target["refresh"]
-            entry(target["name"])["_mode"] = target["mode"]
-    for o in outputs.values():                     # no xdg_output block: use the size of the current mode
-        o.pop("_logical", None)
+            cur_mode = (float(m[3]), (int(m[1]), int(m[2])))
+            e["_pending_mode"] = cur_mode
+        elif s.startswith("flags:") and "current" in s and e.get("_pending_mode"):
+            e["refresh_hz"], e["_mode"] = e["_pending_mode"][0], e["_pending_mode"][1]
+    for o in outputs.values():
+        for private in ("_logical", "_pending_mode"):
+            o.pop(private, None)
         mode = o.pop("_mode", None)
-        if mode and not o["width"]:
+        if mode and not o["width"]:                # no xdg_output block: use the size of the current mode
             o["width"], o["height"] = mode
     return outputs
+
+
+def sdl_display_name(o):
+    """The name SDL 3.4 gives a monitor on Wayland (SDL_waylandvideo.c), which is what VPX puts in its display id.
+
+    wl_output version 4 or newer (SDL binds min(advertised, 4)): the wl_output description; the xdg_output description
+    is ignored ("deprecated as of wl_output v4"). Older wl_output: the xdg_output description. In both cases the
+    wl_output geometry `model` is the fallback when there is no description.
+    Returns (name, where it came from).
+    """
+    version = o["_wl_version"]
+    if version is not None and version >= 4:
+        if o["_wl_description"]:
+            return o["_wl_description"], "wl_output description"
+    elif o["_xdg_description"]:
+        return o["_xdg_description"], "xdg_output description"
+    if o["_model"]:
+        return o["_model"], "wl_output model"
+    return o["_wl_description"] or o["_xdg_description"], "description (not what SDL would use)"
 
 
 def display_id(description, x, y):
@@ -105,23 +148,27 @@ def display_id(description, x, y):
 def parse_wayland_outputs(text):
     """Monitors reported by `wayland-info -i output`, one dict each.
 
-    The list itself is exactly what `grep -oP "description: '\\K[^']+"` prints (e.g. 'LG Electronics LG HDR 4K
-    0x00025EAC (DP-2)'); size and position are added when the output has them but never decide which monitors exist.
-    `id` is the value for the *Display keys: the description plus the logical position, "LG HDR 4K [1920, 0]".
+    `description` is the display name SDL (and so VPX) uses, chosen like SDL does (see sdl_display_name); `name_source`
+    says which field it came from. `id` is the value for the *Display keys: that name plus the logical position,
+    "LG HDR 4K [1920, 0]". On a compositor that reports a description, this is the same text that
+    `grep -oP "description: '\\K[^']+"` prints.
     """
-    details = list(_parse_details(text).values())
     monitors = []
-    add_id = lambda m: {**m, "id": display_id(m["description"], m["x"], m["y"])}
-    descriptions = re.findall(r"description: '([^']+)'", text)
-    if not descriptions:                           # older wayland-info builds print them unquoted (wl_output blocks)
-        descriptions = re.findall(r"^\s*description: (.+?)\s*$", text, re.M)
-    for desc in dict.fromkeys(descriptions):
-        m = next((o for o in details if o["description"] == desc), None)
-        if m is None:
+    for o in _parse_details(text).values():
+        name, source = sdl_display_name(o)
+        if not name:
+            continue
+        m = {k: v for k, v in o.items() if not k.startswith("_")}
+        m.update(description=name, name_source=source, id=display_id(name, o["x"], o["y"]),
+                 model=o["_model"], make=o["_make"], wl_output_version=o["_wl_version"])
+        monitors.append(m)
+    if not monitors:                               # no interface blocks at all: fall back to the descriptions in the text
+        descriptions = re.findall(r"description: '([^']+)'", text) or re.findall(r"^\s*description: (.+?)\s*$", text, re.M)
+        for desc in dict.fromkeys(descriptions):
             name = re.search(r"\(([^()]+)\)\s*$", desc)
-            m = {"name": name[1] if name else desc, "description": desc, "x": 0, "y": 0, "width": 0, "height": 0,
-                 "physical_width_mm": 0, "physical_height_mm": 0, "refresh_hz": 0.0}
-        monitors.append(add_id(m))
+            monitors.append({"name": name[1] if name else desc, "description": desc, "name_source": "description", "x": 0, "y": 0,
+                             "width": 0, "height": 0, "physical_width_mm": 0, "physical_height_mm": 0, "refresh_hz": 0.0,
+                             "id": display_id(desc, 0, 0), "model": "", "make": "", "wl_output_version": None})
     return sorted(monitors, key=lambda o: (o["x"], o["y"]))
 
 

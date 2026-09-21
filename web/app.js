@@ -171,7 +171,10 @@ function displayInfo(f, step) {
       box.append(h("details", { class: "diag" }, h("summary", {}, "What was tried"),
         h("pre", {}, JSON.stringify(app.displayDiagnostics, null, 2))));
   }
-  else if (value && !findMon(value)) {
+  else if (value && findMon(value)) {
+    const m = findMon(value);
+    box.append(h("span", { class: "muted" }, `VPX names this monitor "${m.id}" (the name is SDL's: ${m.name_source}).`));
+  } else if (value && !findMon(value)) {
     const same = looseMon(value);
     box.append(h("span", { class: "warn" }, same
       ? `This monitor is now "${same.id}" (VPX matches the whole text, including the position). Pick it from the list to update.`
@@ -194,7 +197,7 @@ function displayControl(f, step, v) {
   if (detected.length) {
     input = h("select", { id: f.id, onchange },
       h("option", { value: "" }, "Default (VPX chooses)"),
-      detected.map((m) => h("option", { value: m.id, selected: m.id === v }, monLabel(m))),
+      detected.map((m) => h("option", { value: m.id, selected: m.id === v, title: `name from: ${m.name_source}` }, monLabel(m))),
       v && !findMon(v) ? h("option", { value: v, selected: true }, `${v} (${looseMon(v) ? "position or format differs" : "not connected"})`) : null);
   } else {
     input = h("input", { id: f.id, type: "text", value: v, placeholder: "Default display", oninput: onchange });
