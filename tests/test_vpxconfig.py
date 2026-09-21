@@ -1260,6 +1260,131 @@ class SystemTests(unittest.TestCase):
         self.assertEqual([(o["name"], o["description"]) for o in outs],
                          [("HDMI-A-2", "Foo Bar (HDMI-A-2)"), ("eDP-1", "Baz (eDP-1)")])
 
+    # ---- robustness on other compositors (e.g. Weston): sockets, unquoted output, diagnostics ------------------------------
+
+    @staticmethod
+    def wl_output_only(text):
+        """The wayland-info output reduced to its wl_output blocks: no xdg_output, so descriptions are unquoted."""
+        keep, on = [], False
+        for line in text.splitlines():
+            if line.startswith("interface:"):
+                on = "'wl_output'" in line
+            if on:
+                keep.append(line)
+        return "\n".join(keep) + "\n"
+
+    def test_unquoted_descriptions_are_found_when_there_is_no_xdg_output(self):
+        text = self.wl_output_only((HERE / "wayland_info_output.txt").read_text())
+        self.assertNotIn("description: '", text)
+        outs = system.parse_wayland_outputs(text)
+        self.assertEqual(sorted(o["name"] for o in outs), ["DP-2", "DP-3", "HDMI-A-1"])
+        self.assertIn("LG Electronics LG HDR 4K 0x00025EAC (DP-2)", [o["description"] for o in outs])
+        self.assertTrue(all(o["width"] > 0 and o["height"] > 0 for o in outs))            # size from the current mode
+
+    def fake_wayland_session(self, sockets, wayland_display=None):
+        from unittest import mock
+        runtime = Path(tempfile.mkdtemp())
+        for name in sockets:
+            (runtime / name).write_text("")
+        (runtime / "wayland-1.lock").write_text("")
+        env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")}
+        env["XDG_RUNTIME_DIR"] = str(runtime)
+        if wayland_display:
+            env["WAYLAND_DISPLAY"] = wayland_display
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_run(self, outputs):
+        """outputs: socket name -> stdout (or an error dict). Returns the list of sockets the code asked."""
+        from unittest import mock
+        asked = []
+
+        def run(argv, display=None):
+            asked.append(display)
+            out = outputs.get(display, "")
+            if isinstance(out, dict):
+                return {"ok": False, "stdout": "", "stderr": out["stderr"], "exit_code": 1, "error": out["stderr"], "argv": argv}
+            return {"ok": True, "stdout": out, "stderr": "", "exit_code": 0, "error": "", "argv": argv}
+        patcher = mock.patch.object(system, "run", run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return asked
+
+    def test_every_socket_is_tried_until_one_has_monitors(self):
+        full = (HERE / "wayland_info_output.txt").read_text()
+        self.fake_wayland_session(["wayland-0", "wayland-1"])                              # WAYLAND_DISPLAY is not set
+        asked = self.fake_run({"wayland-0": "interface: 'wl_seat', version: 8, name: 3\n", "wayland-1": full})
+        r = system.displays()
+        self.assertEqual((r["ok"], r["wayland_display"], len(r["displays"])), (True, "wayland-1", 3))
+        self.assertEqual(asked, ["wayland-0", "wayland-1"])                                # the .lock file is not a socket
+        tried = r["diagnostics"]["tried"]
+        self.assertEqual([(t["WAYLAND_DISPLAY"], t["monitors"]) for t in tried], [("wayland-0", 0), ("wayland-1", 3)])
+        self.assertEqual(r["diagnostics"]["sockets"], ["wayland-0", "wayland-1"])
+
+    def test_the_sessions_own_wayland_display_is_tried_first(self):
+        full = (HERE / "wayland_info_output.txt").read_text()
+        self.fake_wayland_session(["wayland-0", "wayland-1"], wayland_display="wayland-1")
+        asked = self.fake_run({"wayland-0": full, "wayland-1": full})
+        self.assertEqual(system.displays()["wayland_display"], "wayland-1")
+        self.assertEqual(asked, ["wayland-1"])                                              # found there: nothing else is tried
+
+    def test_a_session_display_without_monitors_falls_back_to_another_socket(self):
+        full = (HERE / "wayland_info_output.txt").read_text()
+        self.fake_wayland_session(["wayland-0", "wayland-1"], wayland_display="wayland-1")
+        asked = self.fake_run({"wayland-1": "", "wayland-0": full})
+        r = system.displays()
+        self.assertEqual((r["ok"], r["wayland_display"]), (True, "wayland-0"))
+        self.assertEqual(asked, ["wayland-1", "wayland-0"])
+
+    def test_no_monitors_anywhere_is_explained(self):
+        self.fake_wayland_session(["wayland-0", "wayland-1"])
+        self.fake_run({"wayland-0": "interface: 'wl_seat'\n", "wayland-1": "interface: 'wl_seat'\n"})
+        r = system.displays()
+        self.assertFalse(r["ok"])
+        self.assertIn("wayland-0, wayland-1", r["error"])
+        self.assertIn("lists no monitors", r["error"])
+        self.assertEqual(len(r["diagnostics"]["tried"]), 2)
+        self.assertEqual(r["diagnostics"]["tried"][0]["output_start"], ["interface: 'wl_seat'"])
+
+    def test_a_failing_wayland_info_reports_its_own_error_and_what_was_tried(self):
+        self.fake_wayland_session(["wayland-0"])
+        self.fake_run({"wayland-0": {"stderr": "failed to create display: No such file or directory"}})
+        r = system.displays()
+        self.assertEqual((r["ok"], r["error"]), (False, "failed to create display: No such file or directory"))
+        self.assertEqual(r["diagnostics"]["tried"][0]["exit_code"], 1)
+
+    def test_no_wayland_session_at_all_still_runs_it_once(self):
+        self.fake_wayland_session([])
+        asked = self.fake_run({None: ""})
+        r = system.displays()
+        self.assertEqual(asked, [None])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["diagnostics"]["WAYLAND_DISPLAY"], "(not set)")
+
+    def test_the_executable_does_not_hand_its_libraries_to_other_programs(self):
+        """PyInstaller points LD_LIBRARY_PATH at its bundled libraries; wayland-info must not inherit that."""
+        from unittest import mock
+        with mock.patch.object(sys, "frozen", True, create=True):
+            with mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": "/tmp/_MEI123", "LD_LIBRARY_PATH_ORIG": "/usr/local/lib"}):
+                self.assertEqual(system._session_env()["LD_LIBRARY_PATH"], "/usr/local/lib")
+                self.assertNotIn("LD_LIBRARY_PATH_ORIG", system._session_env())
+            env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH_ORIG"}
+            env["LD_LIBRARY_PATH"] = "/tmp/_MEI123"
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertNotIn("LD_LIBRARY_PATH", system._session_env())                # there was none originally
+        with mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": "/my/libs"}):
+            self.assertEqual(system._session_env()["LD_LIBRARY_PATH"], "/my/libs")        # from source: untouched
+
+    def test_run_reports_the_exit_code_and_stderr(self):
+        r = system.run([sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr); sys.exit(3)"])
+        self.assertEqual((r["ok"], r["exit_code"], r["stdout"].strip(), r["stderr"].strip(), r["error"]), (False, 3, "out", "err", "err"))
+
+    def test_the_page_shows_what_was_tried_when_detection_fails(self):
+        js = (HERE.parent / "web" / "app.js").read_text()
+        self.assertIn("What was tried", js)
+        self.assertIn("displayDiagnostics", js)
+
     def test_missing_command_is_reported_not_raised(self):
         r = system.run(["definitely-not-a-real-command"])
         self.assertFalse(r["ok"])

@@ -9,7 +9,7 @@ const api = {
 };
 
 const DISPLAY = "display";
-const app = { steps: [], values: {}, displays: null, displayError: "", base: null, baseNotice: "" };
+const app = { steps: [], values: {}, displays: null, displayError: "", base: null, baseNotice: "", displayDiagnostics: null };
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -43,6 +43,7 @@ async function loadDisplays() {
   const r = await api.get("/api/system/displays");
   app.displays = r.displays || [];
   app.displayError = r.ok ? "" : r.error;
+  app.displayDiagnostics = r.diagnostics || null;
   app.displayCommand = r.command || "wayland-info -i output";
 }
 const findMon = (desc) => (app.displays || []).find((m) => m.description === desc);
@@ -160,8 +161,12 @@ const monLabel = (m) => `${m.name} — ${shortDesc(m)}` + (m.width ? ` · ${m.wi
 function displayInfo(f, step) {
   const value = (app.values[f.id] || "").trim();
   const box = h("div", { class: "mon-info row" });
-  if (app.displayError)
+  if (app.displayError) {
     box.append(h("span", { class: "err" }, `Could not detect monitors (${app.displayError}). Type the display name instead.`));
+    if (app.displayDiagnostics)
+      box.append(h("details", { class: "diag" }, h("summary", {}, "What was tried"),
+        h("pre", {}, JSON.stringify(app.displayDiagnostics, null, 2))));
+  }
   else if (value && !findMon(value))
     box.append(h("span", { class: "warn" }, "This display is not connected to this system right now."));
   return box;

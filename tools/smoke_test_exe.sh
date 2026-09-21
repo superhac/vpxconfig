@@ -45,6 +45,9 @@ fields = [f for s in steps["steps"] for g in s["groups"] for f in g["fields"]]
 assert steps["version"], "no version"
 assert len(steps["steps"]) >= 20 and len(fields) >= 150, (len(steps["steps"]), len(fields))       # the bundled base ini was read
 assert steps["steps"][0]["id"] == "start" and steps["steps"][-1]["id"] == "review"
+displays = get("/api/system/displays")                      # on a runner there is no Wayland: it must fail with an explanation
+assert "diagnostics" in displays and displays["diagnostics"]["tried"], displays
+assert displays["ok"] or displays["error"], displays
 preview = get("/api/preview")
 assert preview["changes"] == [] and preview["problems"] == [], preview["changes"]            # a fresh start shows no changes
 req = urllib.request.Request(f"http://127.0.0.1:{port}/api/state", method="PUT", data=json.dumps({"values": {"Player.BGSet": "1"}}).encode(),

@@ -76,6 +76,10 @@ Your answers are stored in `state.json` as a flat `"Section.Key": "value"` map, 
 
 **Keep the base file in step:** a setting defined in code should also be in `VPinballX.ini` (with a comment in its format). Run `tools/sync_base.py` after adding a `Setting`; a test fails until the base file has the key. The tool adds the missing settings, and fills in the starting answers (`initial`) that differ from VPX's default (for example the ScoreView priorities), so that a fresh start compares equal to the base file and Review shows no changes. It never overwrites a value, and running it twice does nothing. If you regenerate `VPinballX.ini` with `VPinballX_BGFX -h`, run the tool afterwards to put the added settings back.
 
+## Monitor detection
+
+The Display fields list the monitors reported by `wayland-info -i output` (the descriptions, as `grep -oP "description: '\\K[^']+"` prints them; VPX stores the description). It uses the session's `WAYLAND_DISPLAY` first and then every other Wayland socket in `XDG_RUNTIME_DIR`, and understands both the quoted and the older unquoted output styles. If nothing is found, the page shows why and a "What was tried" section with the command's exit code, its stderr and the first lines of its output. Start VPXConfig from a terminal inside the desktop session (so it inherits `WAYLAND_DISPLAY`) and compare with `echo $WAYLAND_DISPLAY; ls $XDG_RUNTIME_DIR | grep wayland; which -a wayland-info`. You can always type the display name by hand.
+
 ## Adding a system command
 
 Add a function to `COMMANDS` in `vpxconfig/system.py`. It is served at `/api/system/<name>`. Commands take no user input and run without a shell.
