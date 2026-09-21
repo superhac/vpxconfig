@@ -32,6 +32,7 @@ for _ in $(seq 1 100); do
 done
 
 curl -fs "http://127.0.0.1:$PORT/" | grep -q "<title>VPinConfig</title>"
+curl -fs "http://127.0.0.1:$PORT/" | grep -q 'id="shutdown"'                 # the Shut down button is in the bundled page
 curl -fs "http://127.0.0.1:$PORT/app.js" | grep -q "describeMapping\|mappingControl"
 curl -fs "http://127.0.0.1:$PORT/keys.js" | grep -q "KEY_BY_CODE"
 
@@ -54,4 +55,14 @@ assert state["values"]["Player.BGSet"] == "1"
 assert [c["key"] for c in get("/api/preview")["changes"]] == ["BGSet"]
 print(f"steps: {len(steps['steps'])}, fields: {len(fields)}, version {steps['version']}, state kept in the config folder")
 PY
+# The web page's "Shut down" button: the executable must stop by itself, and free its port.
+curl -fs -X POST -H "X-VPX-Config: 1" -H "Content-Type: application/json" -d '{}' "http://127.0.0.1:$PORT/api/shutdown" | grep -q '"ok": true'
+for _ in $(seq 1 50); do
+  kill -0 "$PID" 2>/dev/null || break
+  sleep 0.2
+done
+if kill -0 "$PID" 2>/dev/null; then echo "the executable did not stop after /api/shutdown"; exit 1; fi
+PID=""
+if curl -fs "http://127.0.0.1:$PORT/api/steps" >/dev/null 2>&1; then echo "the port is still serving after shutdown"; exit 1; fi
+echo "stopped cleanly from /api/shutdown"
 echo "smoke test passed"

@@ -79,3 +79,7 @@ details summary { cursor: pointer; color: var(--muted); }
 .keyname { font-size: 13px; color: var(--muted); margin-top: 4px; }
 details.card > summary { cursor: pointer; font-weight: 600; color: var(--muted); }
 details.card[open] > summary { margin-bottom: 8px; }
+#shutdown { margin: 0 18px 14px; padding: 6px 12px; font-size: 13px; background: transparent; color: var(--side-text);
+  border: 1px solid rgba(255,255,255,.25); border-radius: 8px; cursor: pointer; align-self: flex-start; }
+#shutdown:hover { border-color: var(--err); color: #fff; background: rgba(192,57,43,.35); }
+main.stopped { padding-top: 80px; }

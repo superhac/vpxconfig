@@ -285,6 +285,14 @@ function basePanel() {
         (app.base.backup ? ` A backup copy is at ${app.base.backup}.` : "")));
 }
 
+// ---- shutting the server down ---------------------------------------------------------------
+async function shutdown() {
+  if (!confirm("Stop VPinConfig?\n\nYour answers are saved. The ini file is only written when you click Write on the Review page.")) return;
+  try { await flush(); await api.send("POST", "/api/shutdown"); } catch (e) { /* the server may already be closing the connection */ }
+  document.body.replaceChildren(h("main", { class: "stopped" }, h("h1", {}, "VPinConfig has stopped"),
+    h("p", { class: "muted" }, "You can close this tab. Start VPinConfig again to continue; your answers will still be there.")));
+}
+
 // ---- pages -------------------------------------------------------------------------------
 function pager(i) {
   const prev = app.steps[i - 1], next = app.steps[i + 1];
@@ -377,6 +385,7 @@ async function init() {
   const [s, st] = await Promise.all([api.get("/api/steps"), api.get("/api/state")]);
   app.steps = s.steps; app.output = st.output;
   $(".brand small").textContent = `Version: v${s.version}`;
+  $("#shutdown").addEventListener("click", shutdown);
   app.values = st.values; app.base = st.base;
   renderFoot();
   await loadDisplays();

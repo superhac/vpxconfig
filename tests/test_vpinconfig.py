@@ -1116,6 +1116,78 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("gh release create", " ".join(step.get("run", "") for step in release["steps"]))
 
 
+class ShutdownTests(unittest.TestCase):
+    """The web page's "Shut down" button: POST /api/shutdown stops the server."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        app = server.App(TEMPLATE, self.dir / "out.ini", self.dir / "state.json")
+        self.httpd = server.create_server(app, "127.0.0.1", 0)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.httpd.server_port}"
+
+    def tearDown(self):
+        if self.thread.is_alive():
+            self.httpd.shutdown()
+            self.thread.join(5)
+        self.httpd.server_close()
+
+    def post(self, headers=None):
+        req = urllib.request.Request(self.base + "/api/shutdown", method="POST", data=b"{}", headers=headers or {})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read())
+
+    def test_the_endpoint_stops_the_server_after_answering(self):
+        code, body = self.post({"X-VPX-Config": "1", "Content-Type": "application/json"})
+        self.assertEqual((code, body), (200, {"ok": True}))
+        self.thread.join(5)
+        self.assertFalse(self.thread.is_alive(), "serve_forever did not return")
+        with self.assertRaises(OSError):                                    # nothing is listening any more
+            urllib.request.urlopen(self.base + "/api/state", timeout=2)
+
+    def test_it_is_protected_like_the_other_write_actions(self):
+        code, body = self.post()                                            # no X-VPX-Config header: a page on another site can't do this
+        self.assertEqual(code, 403)
+        code, body = self.post({"X-VPX-Config": "1", "Host": "evil.example:80"})    # DNS-rebinding style request
+        self.assertEqual(code, 403)
+        self.thread.join(0.5)
+        self.assertTrue(self.thread.is_alive())                             # still running after both refusals
+        self.assertEqual(urllib.request.urlopen(self.base + "/api/state").status, 200)
+
+    def test_a_get_does_not_stop_it(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(self.base + "/api/shutdown")
+        self.assertTrue(self.thread.is_alive())
+
+    def test_the_endpoint_is_off_when_no_shutdown_callback_is_given(self):
+        app = server.App(TEMPLATE, self.dir / "o.ini", self.dir / "s.json")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(app, None))     # e.g. the other tests' servers
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/shutdown", method="POST", data=b"{}",
+                                         headers={"X-VPX-Config": "1"})
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req)
+            with cm.exception:
+                self.assertEqual(cm.exception.code, 404)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_the_page_has_the_button_and_asks_first(self):
+        web = HERE.parent / "web"
+        self.assertIn('id="shutdown"', (web / "index.html").read_text())
+        js = (web / "app.js").read_text()
+        self.assertIn('"/api/shutdown"', js)
+        self.assertLess(js.index("confirm(\"Stop VPinConfig?"), js.index('"/api/shutdown"'))      # the question comes before the request
+        self.assertIn("VPinConfig has stopped", js)
+
+
 class FolderListingTests(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp())

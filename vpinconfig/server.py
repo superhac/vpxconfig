@@ -214,7 +214,7 @@ class App:
         return {"file": path.name, "path": str(path), "count": len(p["changes"]), "backup": backup}
 
 
-def make_handler(app, allowed_hosts):
+def make_handler(app, allowed_hosts, shutdown=None):   # shutdown: called to stop the server (the endpoint is off without it)
     class Handler(BaseHTTPRequestHandler):
         server_version = "VPinConfig"
 
@@ -277,6 +277,11 @@ def make_handler(app, allowed_hosts):
         def do_POST(self):
             if not self._guard(True):
                 return
+            if self.path == "/api/shutdown" and shutdown:
+                self._send(200, {"ok": True})        # answer first, then stop, so the page can say so
+                self.wfile.flush()
+                shutdown()
+                return
             if self.path == "/api/save":
                 result = app.save()
                 return self._send(400 if "error" in result else 200, result)
@@ -302,16 +307,32 @@ def make_handler(app, allowed_hosts):
     return Handler
 
 
+def create_server(app, host, port):
+    """The HTTP server for `app`, ready to serve_forever(). POST /api/shutdown stops it."""
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    allowed = set() if loopback else None                    # filled in once the port is known (port 0 picks a free one)
+    httpd = ThreadingHTTPServer((host, port), make_handler(app, allowed, shutdown=lambda: stop(httpd)))
+    if loopback:
+        allowed.update({f"localhost:{httpd.server_port}", f"127.0.0.1:{httpd.server_port}", f"[::1]:{httpd.server_port}"})
+    return httpd
+
+
+def stop(httpd):
+    """Stop serve_forever() from a request thread: shutdown() waits for the serving loop, so it runs on its own thread."""
+    threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+
 def serve(host="127.0.0.1", port=1111):
     app = App()
-    loopback = host in ("127.0.0.1", "localhost", "::1")
-    allowed = {f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}"} if loopback else None
-    httpd = ThreadingHTTPServer((host, port), make_handler(app, allowed))
+    httpd = create_server(app, host, port)
     print(f"VPinConfig {__version__}: http://localhost:{port}   (base: {app.template_path.name}, writes to: {app.output_path}, "
           f"answers kept in: {app.state_path})")
-    if not loopback:
+    if host not in ("127.0.0.1", "localhost", "::1"):
         print("WARNING: listening on a non-loopback address; anyone on the network can browse this machine's folders and change the output file.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print()
+    finally:
+        httpd.server_close()
+        print("VPinConfig stopped.")
