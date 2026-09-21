@@ -957,7 +957,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(app.info()["version"], vpinconfig.__version__)
 
     def test_the_web_page_shows_the_version(self):
-        self.assertIn("v${s.version}", (self.ROOT / "web" / "app.js").read_text())
+        self.assertIn("`Version: v${s.version}`", (self.ROOT / "web" / "app.js").read_text())
+        self.assertNotIn("Visual Pinball X", (self.ROOT / "web" / "index.html").read_text())     # no leftover tagline
 
     def test_the_tag_check(self):
         import vpinconfig
