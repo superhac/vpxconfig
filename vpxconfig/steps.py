@@ -33,9 +33,9 @@ def _window(prefix, title, description, priorities=()):
 
 STEPS = [
     {
-        # VPinConfig's own configuration: which ini to start from and where the new file is written.
+        # VPXConfig's own configuration: which ini to start from and where the new file is written.
         "id": "start", "title": "Start", "panels": ["base", "target"],
-        "description": "Configure VPinConfig itself: the ini file to start from and where the new file is written.",
+        "description": "Configure VPXConfig itself: the ini file to start from and where the new file is written.",
         "groups": [],
     },
     {

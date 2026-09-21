@@ -1,5 +1,5 @@
 "use strict";
-// VPinConfig UI. No build step, no dependencies. The step/field definitions come from /api/steps.
+// VPXConfig UI. No build step, no dependencies. The step/field definitions come from /api/steps.
 
 const $ = (sel) => document.querySelector(sel);
 const HEADERS = { "Content-Type": "application/json", "X-VPX-Config": "1" };
@@ -192,7 +192,7 @@ function displayControl(f, step, v) {
     displayInfo(f, step));
 }
 
-// ---- VPinConfig's own settings (Start page) ----------------------------------------------
+// ---- VPXConfig's own settings (Start page) ----------------------------------------------
 function renderFoot() {
   $("#sidebar-foot").textContent = `Base: ${app.base.name} → ${app.output.name}`;
 }
@@ -287,10 +287,10 @@ function basePanel() {
 
 // ---- shutting the server down ---------------------------------------------------------------
 async function shutdown() {
-  if (!confirm("Stop VPinConfig?\n\nYour answers are saved. The ini file is only written when you click Write on the Review page.")) return;
+  if (!confirm("Stop VPXConfig?\n\nYour answers are saved. The ini file is only written when you click Write on the Review page.")) return;
   try { await flush(); await api.send("POST", "/api/shutdown"); } catch (e) { /* the server may already be closing the connection */ }
-  document.body.replaceChildren(h("main", { class: "stopped" }, h("h1", {}, "VPinConfig has stopped"),
-    h("p", { class: "muted" }, "You can close this tab. Start VPinConfig again to continue; your answers will still be there.")));
+  document.body.replaceChildren(h("main", { class: "stopped" }, h("h1", {}, "VPXConfig has stopped"),
+    h("p", { class: "muted" }, "You can close this tab. Start VPXConfig again to continue; your answers will still be there.")));
 }
 
 // ---- pages -------------------------------------------------------------------------------

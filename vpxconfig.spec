@@ -1,4 +1,4 @@
-# PyInstaller spec: one-file executable.  Build with tools/build.sh (or: pyinstaller vpinconfig.spec).
+# PyInstaller spec: one-file executable.  Build with tools/build.sh (or: pyinstaller vpxconfig.spec).
 # Relative paths below are relative to this file.
 a = Analysis(
     ["run.py"],
@@ -16,7 +16,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="vpinconfig",
+    name="vpxconfig",
     console=True,       # a local web server: it prints its address and stops with Ctrl+C
     upx=False,
 )

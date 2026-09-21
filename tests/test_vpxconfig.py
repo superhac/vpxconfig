@@ -11,10 +11,10 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from vpinconfig import fs, server, settings, system
-from vpinconfig.generate import changes, generate
-from vpinconfig.ini import IniDocument, parse_comment
-from vpinconfig.settings import Setting, resolve, validate
+from vpxconfig import fs, server, settings, system
+from vpxconfig.generate import changes, generate
+from vpxconfig.ini import IniDocument, parse_comment
+from vpxconfig.settings import Setting, resolve, validate
 
 HERE = Path(__file__).parent
 TEMPLATE = HERE.parent / "VPinballX.ini"
@@ -373,9 +373,9 @@ class SettingTests(unittest.TestCase):
 
     def test_base_file_comments_agree_with_the_code_definitions(self):
         """The plugin and priority settings are defined in code AND commented in the base file; they must not drift."""
-        from vpinconfig.plugins import plugin_groups
-        from vpinconfig.steps import STEPS
-        from vpinconfig.inputs import input_groups
+        from vpxconfig.plugins import plugin_groups
+        from vpxconfig.steps import STEPS
+        from vpxconfig.inputs import input_groups
         explicit = [s for g in plugin_groups() for s in g["fields"]]
         explicit += [s for st in STEPS if st["id"] == "scoreview" for g in st["groups"] for s in g["fields"]
                      if s.key.startswith("Priority.")]
@@ -713,7 +713,7 @@ class PluginPagesTests(unittest.TestCase):
         cls.pages = [s for s in cls.app.steps if s.get("parent") == "Plugins"]
 
     def test_one_page_per_plugin_in_order(self):
-        from vpinconfig.plugins import EXTRA_PLUGINS, PLUGINS
+        from vpxconfig.plugins import EXTRA_PLUGINS, PLUGINS
         self.assertEqual([s["title"] for s in self.pages], PLUGINS + [name for name, _, _ in EXTRA_PLUGINS])
         self.assertEqual(len(self.pages), 19)
         self.assertEqual(len({s["id"] for s in self.app.steps}), len(self.app.steps))          # ids unique
@@ -946,23 +946,23 @@ class ReleaseTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(self.ROOT / "tools" / "check_version.py"), *args], capture_output=True, text=True)
 
     def test_the_version_looks_like_0_5_or_0_5_1(self):
-        import vpinconfig
-        self.assertRegex(vpinconfig.__version__, r"^\d+\.\d+(\.\d+)?$")
+        import vpxconfig
+        self.assertRegex(vpxconfig.__version__, r"^\d+\.\d+(\.\d+)?$")
 
     def test_the_version_is_shown_on_the_command_line_and_by_the_api(self):
-        import vpinconfig
+        import vpxconfig
         out = subprocess.run([sys.executable, str(self.ROOT / "run.py"), "--version"], capture_output=True, text=True)
-        self.assertEqual((out.returncode, out.stdout.strip()), (0, f"VPinConfig {vpinconfig.__version__}"))
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, f"VPXConfig {vpxconfig.__version__}"))
         app = server.App(TEMPLATE, None, Path(tempfile.mkdtemp()) / "s.json")
-        self.assertEqual(app.info()["version"], vpinconfig.__version__)
+        self.assertEqual(app.info()["version"], vpxconfig.__version__)
 
     def test_the_web_page_shows_the_version(self):
         self.assertIn("`Version: v${s.version}`", (self.ROOT / "web" / "app.js").read_text())
         self.assertNotIn("Visual Pinball X", (self.ROOT / "web" / "index.html").read_text())     # no leftover tagline
 
     def test_the_tag_check(self):
-        import vpinconfig
-        v = vpinconfig.__version__
+        import vpxconfig
+        v = vpxconfig.__version__
         ok = self.run_tool(f"v{v}")
         self.assertEqual((ok.returncode, "matches" in ok.stdout), (0, True))
         for bad in (f"v{v}.1", v, f"V{v}", f"v.{v}", "v99.99"):
@@ -972,7 +972,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(self.run_tool().returncode, 0)                       # no tag given
 
     def test_paths_from_source_use_the_project_folder(self):
-        from vpinconfig import paths
+        from vpxconfig import paths
         self.assertFalse(paths.frozen())
         self.assertEqual(paths.resource_dir(), paths.PROJECT)
         self.assertEqual(paths.state_path(), paths.PROJECT / "state.json")
@@ -980,20 +980,20 @@ class ReleaseTests(unittest.TestCase):
     def test_paths_in_the_executable(self):
         """Bundled files come from PyInstaller's unpack folder; the state goes to the config folder, which survives runs."""
         from unittest import mock
-        from vpinconfig import paths
+        from vpxconfig import paths
         bundle = self.ROOT / "web"
         with mock.patch.object(sys, "frozen", True, create=True), mock.patch.object(sys, "_MEIPASS", str(bundle), create=True):
             self.assertEqual(paths.resource_dir(), bundle)
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/somewhere/config"}):
-                self.assertEqual(paths.state_path(), Path("/somewhere/config/vpinconfig/state.json"))
+                self.assertEqual(paths.state_path(), Path("/somewhere/config/vpxconfig/state.json"))
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/is/ignored"}):
-                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpinconfig" / "state.json")
+                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpxconfig" / "state.json")
             env = {k: v for k, v in os.environ.items() if k != "XDG_CONFIG_HOME"}
             with mock.patch.dict(os.environ, env, clear=True):
-                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpinconfig" / "state.json")
+                self.assertEqual(paths.state_path(), Path.home() / ".config" / "vpxconfig" / "state.json")
 
     def test_the_state_folder_is_created_when_needed(self):
-        state = Path(tempfile.mkdtemp()) / "config" / "vpinconfig" / "state.json"      # neither folder exists yet
+        state = Path(tempfile.mkdtemp()) / "config" / "vpxconfig" / "state.json"      # neither folder exists yet
         app = server.App(TEMPLATE, None, state)
         app.update_state({"values": {"Player.BGSet": "1"}})
         self.assertEqual(json.loads(state.read_text())["values"]["Player.BGSet"], "1")
@@ -1015,7 +1015,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_set_version_rewrites_only_the_version_line(self):
         tool = self.load_tool("set_version")
-        source = (self.ROOT / "vpinconfig" / "__init__.py").read_text()
+        source = (self.ROOT / "vpxconfig" / "__init__.py").read_text()
         new = tool.with_version(source, "0.6")
         self.assertIn('__version__ = "0.6"', new)
         self.assertEqual(len(new.splitlines()), len(source.splitlines()))
@@ -1072,25 +1072,25 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("refs/tags/", release["if"])
 
     def test_the_spec_bundles_what_the_app_reads_at_runtime(self):
-        spec = (self.ROOT / "vpinconfig.spec").read_text()
+        spec = (self.ROOT / "vpxconfig.spec").read_text()
         self.assertIn('("web", "web")', spec)
         self.assertIn('("VPinballX.ini", ".")', spec)
         self.assertIn('["run.py"]', spec)
         self.assertTrue((self.ROOT / "web").is_dir() and (self.ROOT / "VPinballX.ini").is_file())
         self.assertIn("pyinstaller", (self.ROOT / "requirements-build.txt").read_text().lower())
 
-    def test_the_executable_is_simply_called_vpinconfig(self):
+    def test_the_executable_is_simply_called_vpxconfig(self):
         """Linux x86_64 only, and the version is in the release and in --version, so the file name carries neither."""
         build = (self.ROOT / "tools" / "build.sh").read_text()
         self.assertNotIn("linux-", build)
         self.assertNotIn("${VERSION}", build)
-        self.assertIn("sha256sum vpinconfig > vpinconfig.sha256", build)
-        self.assertIn('name="vpinconfig"', (self.ROOT / "vpinconfig.spec").read_text().replace("\n    ", " "))
+        self.assertIn("sha256sum vpxconfig > vpxconfig.sha256", build)
+        self.assertIn('name="vpxconfig"', (self.ROOT / "vpxconfig.spec").read_text().replace("\n    ", " "))
         for name in ("release.yml",):
             text = (self.ROOT / ".github" / "workflows" / name).read_text()
-            self.assertIn("dist/vpinconfig", text)
-            self.assertNotIn("linux-x86_64 ", text.replace("vpinconfig-linux-x86_64", ""))   # no platform suffix on the file itself
-            self.assertNotIn("vpinconfig-v", text)
+            self.assertIn("dist/vpxconfig", text)
+            self.assertNotIn("linux-x86_64 ", text.replace("vpxconfig-linux-x86_64", ""))   # no platform suffix on the file itself
+            self.assertNotIn("vpxconfig-v", text)
 
     def test_the_build_uses_a_virtual_environment_not_the_system_python(self):
         build = (self.ROOT / "tools" / "build.sh").read_text()
@@ -1184,8 +1184,8 @@ class ShutdownTests(unittest.TestCase):
         self.assertIn('id="shutdown"', (web / "index.html").read_text())
         js = (web / "app.js").read_text()
         self.assertIn('"/api/shutdown"', js)
-        self.assertLess(js.index("confirm(\"Stop VPinConfig?"), js.index('"/api/shutdown"'))      # the question comes before the request
-        self.assertIn("VPinConfig has stopped", js)
+        self.assertLess(js.index("confirm(\"Stop VPXConfig?"), js.index('"/api/shutdown"'))      # the question comes before the request
+        self.assertIn("VPXConfig has stopped", js)
 
 
 class FolderListingTests(unittest.TestCase):
@@ -1297,7 +1297,7 @@ class ServerTests(unittest.TestCase):
         steps = json.loads(body)["steps"]
         self.assertEqual([s["id"] for s in steps][:3], ["start", "general", "playfield"])
         self.assertEqual(steps[0]["panels"], ["base", "target"])
-        self.assertEqual([f["id"] for g in steps[0]["groups"] for f in g["fields"]], [])          # Start: VPinConfig's own settings only
+        self.assertEqual([f["id"] for g in steps[0]["groups"] for f in g["fields"]], [])          # Start: VPXConfig's own settings only
         self.assertEqual([f["id"] for g in steps[1]["groups"] for f in g["fields"]],
                          ["Player.BGSet", "Player.MaxFramerate", "Player.MaxTexDimension"])
 

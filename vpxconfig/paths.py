@@ -1,4 +1,4 @@
-"""Where VPinConfig finds its bundled files and keeps its state.
+"""Where VPXConfig finds its bundled files and keeps its state.
 
 Run from source, everything is in the project folder. Run as a PyInstaller one-file executable, the read-only files
 that are bundled inside it (the web pages and the base VPinballX.ini) are in the temporary folder the executable
@@ -27,4 +27,4 @@ def state_path():
         return PROJECT / "state.json"
     base = os.environ.get("XDG_CONFIG_HOME", "")
     config = Path(base) if base and Path(base).is_absolute() else Path.home() / ".config"
-    return config / "vpinconfig" / "state.json"
+    return config / "vpxconfig" / "state.json"

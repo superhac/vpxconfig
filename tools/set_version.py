@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set the version of a build: rewrites __version__ in vpinconfig/__init__.py.
+"""Set the version of a build: rewrites __version__ in vpxconfig/__init__.py.
 
     tools/set_version.py 0.6           (a leading "v" is accepted: v0.6)
 
@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-INIT = Path(__file__).resolve().parent.parent / "vpinconfig" / "__init__.py"
+INIT = Path(__file__).resolve().parent.parent / "vpxconfig" / "__init__.py"
 VERSION = re.compile(r"\d+\.\d+(\.\d+)?")
 
 

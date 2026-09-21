@@ -1,4 +1,4 @@
-"""VPinConfig HTTP server: the wizard UI plus a small JSON API. Standard library only."""
+"""VPXConfig HTTP server: the wizard UI plus a small JSON API. Standard library only."""
 import json
 import mimetypes
 import os
@@ -94,7 +94,7 @@ class App:
             raise ValueError("That is a backup file name; choose the ini file to write")
         try:
             if path.exists() and path.resolve() == self.template_path.resolve():
-                raise ValueError("That is VPinConfig's own base file, which is never overwritten")
+                raise ValueError("That is VPXConfig's own base file, which is never overwritten")
         except OSError:
             pass
         return str(path)
@@ -216,7 +216,7 @@ class App:
 
 def make_handler(app, allowed_hosts, shutdown=None):   # shutdown: called to stop the server (the endpoint is off without it)
     class Handler(BaseHTTPRequestHandler):
-        server_version = "VPinConfig"
+        server_version = "VPXConfig"
 
         def log_message(self, fmt, *args):
             print(f"{self.address_string()} {fmt % args}")
@@ -325,7 +325,7 @@ def stop(httpd):
 def serve(host="127.0.0.1", port=1111):
     app = App()
     httpd = create_server(app, host, port)
-    print(f"VPinConfig {__version__}: http://localhost:{port}   (base: {app.template_path.name}, writes to: {app.output_path}, "
+    print(f"VPXConfig {__version__}: http://localhost:{port}   (base: {app.template_path.name}, writes to: {app.output_path}, "
           f"answers kept in: {app.state_path})")
     if host not in ("127.0.0.1", "localhost", "::1"):
         print("WARNING: listening on a non-loopback address; anyone on the network can browse this machine's folders and change the output file.")
@@ -335,4 +335,4 @@ def serve(host="127.0.0.1", port=1111):
         print()
     finally:
         httpd.server_close()
-        print("VPinConfig stopped.")
+        print("VPXConfig stopped.")

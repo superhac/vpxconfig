@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test of the built executable.  Usage: tools/smoke_test_exe.sh dist/vpinconfig [port]
+# Smoke test of the built executable.  Usage: tools/smoke_test_exe.sh dist/vpxconfig [port]
 #
 # Set EXPECTED_VERSION (for example 0.6) to also require exactly that version.
 #
@@ -15,8 +15,8 @@ trap cleanup EXIT
 
 VERSION_LINE=$("$EXE" --version)
 echo "version: $VERSION_LINE"
-[[ "$VERSION_LINE" =~ ^VPinConfig\ [0-9]+\.[0-9]+ ]] || { echo "unexpected --version output"; exit 1; }
-if [ -n "${EXPECTED_VERSION:-}" ] && [ "$VERSION_LINE" != "VPinConfig $EXPECTED_VERSION" ]; then
+[[ "$VERSION_LINE" =~ ^VPXConfig\ [0-9]+\.[0-9]+ ]] || { echo "unexpected --version output"; exit 1; }
+if [ -n "${EXPECTED_VERSION:-}" ] && [ "$VERSION_LINE" != "VPXConfig $EXPECTED_VERSION" ]; then
   echo "expected version $EXPECTED_VERSION but the executable says: $VERSION_LINE"; exit 1
 fi
 
@@ -31,7 +31,7 @@ for _ in $(seq 1 100); do
   sleep 0.2
 done
 
-curl -fs "http://127.0.0.1:$PORT/" | grep -q "<title>VPinConfig</title>"
+curl -fs "http://127.0.0.1:$PORT/" | grep -q "<title>VPXConfig</title>"
 curl -fs "http://127.0.0.1:$PORT/" | grep -q 'id="shutdown"'                 # the Shut down button is in the bundled page
 curl -fs "http://127.0.0.1:$PORT/app.js" | grep -q "describeMapping\|mappingControl"
 curl -fs "http://127.0.0.1:$PORT/keys.js" | grep -q "KEY_BY_CODE"
@@ -50,7 +50,7 @@ assert preview["changes"] == [] and preview["problems"] == [], preview["changes"
 req = urllib.request.Request(f"http://127.0.0.1:{port}/api/state", method="PUT", data=json.dumps({"values": {"Player.BGSet": "1"}}).encode(),
                              headers={"Content-Type": "application/json", "X-VPX-Config": "1"})
 urllib.request.urlopen(req)
-state = json.load(open(f"{work}/config/vpinconfig/state.json"))                                # kept in the config folder
+state = json.load(open(f"{work}/config/vpxconfig/state.json"))                                # kept in the config folder
 assert state["values"]["Player.BGSet"] == "1"
 assert [c["key"] for c in get("/api/preview")["changes"]] == ["BGSet"]
 print(f"steps: {len(steps['steps'])}, fields: {len(fields)}, version {steps['version']}, state kept in the config folder")

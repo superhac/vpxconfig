@@ -1,7 +1,7 @@
 name: Release
 
 # Two ways to run this:
-#   * Push a tag such as v0.5 (it must match __version__ in vpinconfig/__init__.py): builds, tests and publishes a release.
+#   * Push a tag such as v0.5 (it must match __version__ in vpxconfig/__init__.py): builds, tests and publishes a release.
 #   * Run it by hand from the Actions tab ("Run workflow"): type the version to build. It builds and tests the
 #     executable for that version (the code's own version is replaced for this run only), and publishes a release
 #     v<version> only if "Publish" is ticked (the tag is then created on the commit that was run).
@@ -48,10 +48,10 @@ jobs:
           else
             python tools/check_version.py "$GITHUB_REF_NAME"
           fi
-          VERSION=$(python -c "import vpinconfig; print(vpinconfig.__version__)")
+          VERSION=$(python -c "import vpxconfig; print(vpxconfig.__version__)")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building VPinConfig $VERSION"
+          echo "Building VPXConfig $VERSION"
 
       - name: Stop early if that release already exists
         if: github.event_name == 'workflow_dispatch' && inputs.publish
@@ -74,14 +74,14 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          bash tools/smoke_test_exe.sh dist/vpinconfig
+          bash tools/smoke_test_exe.sh dist/vpxconfig
 
       - uses: actions/upload-artifact@v7
         with:
-          name: vpinconfig-linux-x86_64
+          name: vpxconfig-linux-x86_64
           path: |
-            dist/vpinconfig
-            dist/vpinconfig.sha256
+            dist/vpxconfig
+            dist/vpxconfig.sha256
           if-no-files-found: error
 
   release:
@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: vpinconfig-linux-x86_64
+          name: vpxconfig-linux-x86_64
           path: dist
 
       - name: Create the release
@@ -107,6 +107,6 @@ jobs:
           if [ "$EVENT" = "workflow_dispatch" ]; then TARGET=(--target "$GITHUB_SHA"); fi   # a manual run creates the tag
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "VPinConfig $TAG" \
+            --title "VPXConfig $TAG" \
             --generate-notes \
             "${TARGET[@]}"
