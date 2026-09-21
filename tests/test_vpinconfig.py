@@ -1035,6 +1035,26 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(run().returncode, 0)
 
     @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_the_workflow_avoids_the_github_deprecation_warnings(self):
+        """Node 20 actions are deprecated (these are the first major versions that run on Node 24), and "-latest" runner
+        labels move to new Ubuntu releases on GitHub's schedule."""
+        import re
+        import yaml
+        wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
+        first_node24 = {"actions/checkout": 5, "actions/setup-python": 6, "actions/upload-artifact": 6, "actions/download-artifact": 7}
+        seen = set()
+        for job in wf["jobs"].values():
+            self.assertNotIn("latest", job["runs-on"])
+            for step in job["steps"]:
+                if "uses" in step:
+                    action, _, ref = step["uses"].partition("@")
+                    self.assertIn(action, first_node24, f"unexpected action {action}")
+                    self.assertRegex(ref, r"^v\d+$")
+                    self.assertGreaterEqual(int(ref[1:]), first_node24[action], step["uses"])
+                    seen.add(action)
+        self.assertEqual(seen, set(first_node24))
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
     def test_the_manual_run_asks_for_a_version(self):
         import yaml
         wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
