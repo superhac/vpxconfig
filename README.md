@@ -1,4 +1,5 @@
 # VPXConfig
+<img width="1279" height="798" alt="image" src="https://github.com/user-attachments/assets/f2aa7ac8-d59a-49bf-aa37-b2d286764670" />
 
 A small local web app that walks you through the VPinballX settings for a three-screen cabinet and
 writes a new ini file.
