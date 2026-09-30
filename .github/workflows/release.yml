@@ -5,6 +5,11 @@ name: Release
 #   * Run it by hand from the Actions tab ("Run workflow"): type the version to build. It builds and tests the
 #     executable for that version (the code's own version is replaced for this run only), and publishes a release
 #     v<version> only if "Publish" is ticked (the tag is then created on the commit that was run).
+#
+# Builds for two architectures (Linux amd64 and arm64, both native GitHub-hosted runners: PyInstaller bundles a real
+# interpreter for whatever machine runs it, so it can't cross-compile). Each release asset carries its architecture
+# in the file name, e.g. vpxconfig-linux-amd64 / vpxconfig-linux-arm64, since a release can't have two files with
+# the same name.
 on:
   push:
     tags: ["v*"]
@@ -24,10 +29,11 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and test (Linux x86_64)
-    runs-on: ubuntu-22.04   # an older glibc, so the executable also runs on older distributions
+  version:
+    name: Work out the version
+    runs-on: ubuntu-22.04
     outputs:
+      version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
@@ -36,8 +42,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # A tag run must match the version in the code. A manual run puts the typed version into the code for this run.
-      # The typed text reaches the shell only as an environment variable, and set_version.py validates it.
+      # A tag run must match the version in the code. A manual run just checks the typed version is well formed; each
+      # build job puts it into its own checkout further down (the typed text reaches the shell only as an environment
+      # variable, and set_version.py/check_version.py validate it).
       - name: Work out the version
         id: ver
         env:
@@ -64,29 +71,60 @@ jobs:
             exit 1
           fi
 
+  build:
+    name: Build and test (${{ matrix.arch }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04       # an older glibc, so the executable also runs on older distributions
+          - arch: arm64
+            runner: ubuntu-22.04-arm   # GitHub-hosted arm64 runner (native build: PyInstaller can't cross-compile)
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set the version for this build
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: python tools/set_version.py "$VERSION"
+
       - name: Unit tests
         run: python -m unittest discover -s tests
 
       - name: Build the executable
         run: bash tools/build.sh
 
+      - name: Name the release asset
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mv dist/vpxconfig "dist/vpxconfig-linux-$ARCH"
+          (cd dist && sha256sum "vpxconfig-linux-$ARCH" > "vpxconfig-linux-$ARCH.sha256")
+
       - name: Smoke test the executable
         env:
-          EXPECTED_VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          bash tools/smoke_test_exe.sh dist/vpxconfig
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: bash tools/smoke_test_exe.sh "dist/vpxconfig-linux-$ARCH"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: vpxconfig-linux-x86_64
+          name: vpxconfig-linux-${{ matrix.arch }}
           path: |
-            dist/vpxconfig
-            dist/vpxconfig.sha256
+            dist/vpxconfig-linux-${{ matrix.arch }}
+            dist/vpxconfig-linux-${{ matrix.arch }}.sha256
           if-no-files-found: error
 
   release:
     name: Publish the release
-    needs: build
+    needs: [version, build]
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-24.04   # a fixed label: "ubuntu-latest" moves to a new Ubuntu release on its own schedule
     permissions:
@@ -94,13 +132,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: vpxconfig-linux-x86_64
+          pattern: vpxconfig-linux-*
           path: dist
+          merge-multiple: true   # both architectures' files land directly in dist/, not one subfolder each
 
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.build.outputs.tag }}
+          TAG: ${{ needs.version.outputs.tag }}
           EVENT: ${{ github.event_name }}
         run: |
           TARGET=()

@@ -1045,6 +1045,8 @@ class ReleaseTests(unittest.TestCase):
         seen = set()
         for job in wf["jobs"].values():
             self.assertNotIn("latest", job["runs-on"])
+            for leg in job.get("strategy", {}).get("matrix", {}).get("include", []):    # e.g. the build job's per-arch runners
+                self.assertNotIn("latest", leg["runner"])
             for step in job["steps"]:
                 if "uses" in step:
                     action, _, ref = step["uses"].partition("@")
@@ -1079,18 +1081,30 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue((self.ROOT / "web").is_dir() and (self.ROOT / "VPinballX.ini").is_file())
         self.assertIn("pyinstaller", (self.ROOT / "requirements-build.txt").read_text().lower())
 
-    def test_the_executable_is_simply_called_vpxconfig(self):
-        """Linux x86_64 only, and the version is in the release and in --version, so the file name carries neither."""
+    def test_the_built_executable_itself_is_simply_called_vpxconfig(self):
+        """build.sh/the spec don't know about architecture or version: PyInstaller just names its output for the
+        machine it happens to run on. The version is available via --version, so the file name never carries it."""
         build = (self.ROOT / "tools" / "build.sh").read_text()
         self.assertNotIn("linux-", build)
         self.assertNotIn("${VERSION}", build)
         self.assertIn("sha256sum vpxconfig > vpxconfig.sha256", build)
         self.assertIn('name="vpxconfig"', (self.ROOT / "vpxconfig.spec").read_text().replace("\n    ", " "))
-        for name in ("release.yml",):
-            text = (self.ROOT / ".github" / "workflows" / name).read_text()
-            self.assertIn("dist/vpxconfig", text)
-            self.assertNotIn("linux-x86_64 ", text.replace("vpxconfig-linux-x86_64", ""))   # no platform suffix on the file itself
-            self.assertNotIn("vpxconfig-v", text)
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_release_assets_carry_an_architecture_marker_but_not_a_version(self):
+        """Two architectures are built, so the *release* file names must tell them apart (a release can't have two
+        assets with the same name); they still don't carry the version, since that's already in the release/tag."""
+        import yaml
+        text = (self.ROOT / ".github" / "workflows" / "release.yml").read_text()
+        wf = yaml.safe_load(text)
+        rename = next(s for s in wf["jobs"]["build"]["steps"] if s.get("name") == "Name the release asset")
+        self.assertIn("dist/vpxconfig-linux-$ARCH", rename["run"])              # the built vpxconfig is renamed...
+        self.assertEqual(rename["env"]["ARCH"], "${{ matrix.arch }}")           # ...to the matrix's own architecture
+        upload = next(s for s in wf["jobs"]["build"]["steps"] if s.get("uses", "").startswith("actions/upload-artifact"))
+        self.assertIn("vpxconfig-linux-${{ matrix.arch }}", upload["with"]["name"])
+        self.assertIn("vpxconfig-linux-${{ matrix.arch }}", upload["with"]["path"])
+        self.assertIn("vpxconfig-linux-${{ matrix.arch }}.sha256", upload["with"]["path"])
+        self.assertNotIn("vpxconfig-v", text)                                   # no version baked into any file name
 
     def test_the_build_uses_a_virtual_environment_not_the_system_python(self):
         build = (self.ROOT / "tools" / "build.sh").read_text()
@@ -1105,15 +1119,42 @@ class ReleaseTests(unittest.TestCase):
         triggers = wf.get("on", wf.get(True))
         self.assertEqual(triggers["push"]["tags"], ["v*"])
         self.assertIn("workflow_dispatch", triggers)
-        build, release = wf["jobs"]["build"], wf["jobs"]["release"]
-        commands = " ".join(step.get("run", "") for step in build["steps"])
-        for needed in ("check_version.py", "unittest discover", "tools/build.sh", "smoke_test_exe.sh"):
-            self.assertIn(needed, commands)
-        self.assertEqual(release["needs"], "build")
+        version, build, release = wf["jobs"]["version"], wf["jobs"]["build"], wf["jobs"]["release"]
+
+        version_commands = " ".join(step.get("run", "") for step in version["steps"])
+        self.assertIn("check_version.py", version_commands)              # a tag run must match __version__
+        self.assertIn("set_version.py", version_commands)                # a manual run validates + stamps the typed version
+
+        build_commands = " ".join(step.get("run", "") for step in build["steps"])
+        for needed in ("set_version.py", "unittest discover", "tools/build.sh", "smoke_test_exe.sh"):
+            self.assertIn(needed, build_commands)
+        self.assertEqual(build["needs"], "version")                      # uses the version job's resolved version/tag
+
+        self.assertEqual(release["needs"], ["version", "build"])
         self.assertIn("refs/tags/", release["if"])                       # only tags publish; a manual run just builds
         self.assertEqual(release["permissions"], {"contents": "write"})
         self.assertEqual(wf["permissions"], {"contents": "read"})        # least privilege everywhere else
         self.assertIn("gh release create", " ".join(step.get("run", "") for step in release["steps"]))
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_both_architectures_are_built_natively(self):
+        """PyInstaller bundles a real interpreter for the machine that runs it, so it can't cross-compile: each
+        architecture must build on a runner that is actually that architecture."""
+        import yaml
+        wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
+        legs = {leg["arch"]: leg["runner"] for leg in wf["jobs"]["build"]["strategy"]["matrix"]["include"]}
+        self.assertEqual(set(legs), {"amd64", "arm64"})
+        self.assertNotIn("arm", legs["amd64"])
+        self.assertIn("arm", legs["arm64"])
+        self.assertTrue(wf["jobs"]["build"]["strategy"].get("fail-fast") is False)   # one arch failing shouldn't cancel the other
+
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML not installed")
+    def test_the_release_downloads_and_merges_both_architectures(self):
+        import yaml
+        wf = yaml.safe_load((self.ROOT / ".github" / "workflows" / "release.yml").read_text())
+        download = next(s for s in wf["jobs"]["release"]["steps"] if s.get("uses", "").startswith("actions/download-artifact"))
+        self.assertEqual(download["with"]["pattern"], "vpxconfig-linux-*")
+        self.assertTrue(download["with"]["merge-multiple"])
 
 
 class ShutdownTests(unittest.TestCase):
