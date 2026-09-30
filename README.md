@@ -15,10 +15,10 @@ writes a new ini file.
 
 ## Running the executable
 
-Each release has a single file, `vpxconfig` (Linux x86_64 only), that needs no Python. The version is in the release's name and in `--version`:
+Each release has one archive per architecture, `vpxconfig-linux-x86_64.tar.gz` and `vpxconfig-linux-arm64.tar.gz`. Each holds a single file, `vpxconfig`, that needs no Python. The version is in the release's name and in `--version`:
 
 ```
-chmod +x vpxconfig
+tar -xzf vpxconfig-linux-x86_64.tar.gz
 ./vpxconfig          # then open http://localhost:1111 in Chrome
 ./vpxconfig --version
 ```
@@ -97,12 +97,12 @@ tools/smoke_test_exe.sh dist/vpxconfig
 
 The version is set in one place, `__version__` in `vpxconfig/__init__.py` (the first version is `0.5`). It is shown by `--version`, in the start-up message and in the page's sidebar. A release is named by a git tag `v<version>`, for example `v0.5`; the executable file itself is always just `vpxconfig`.
 
-The `Release` workflow (`.github/workflows/release.yml`) builds on Ubuntu 22.04 (an older glibc, so the executable runs on older distributions too), runs the unit tests, smoke tests the executable, and can publish a GitHub release with `vpxconfig`, `vpxconfig.sha256` and generated release notes. Only Linux x86_64 is built: the wizard uses Linux tools (`wayland-info`) and VPX's Linux settings location. There are two ways to run it:
+The `Release` workflow (`.github/workflows/release.yml`) builds on Ubuntu 22.04 for x86_64 and for arm64 (an older glibc, so the executable runs on older distributions too), runs the unit tests, smoke tests each executable, and can publish a GitHub release with both archives, their `.sha256` files and generated release notes. Only Linux is built: the wizard uses Linux tools (`wayland-info`) and VPX's Linux settings location. There are two ways to run it:
 
 - **Push a tag.** Set `__version__` (skip this for `0.5`, which is already set), commit, then `git tag v0.5 && git push origin v0.5`. The workflow first checks that the tag matches `__version__`; a mismatch fails before anything is built. It then builds and publishes the release.
-- **Run it by hand.** On GitHub go to Actions, Release, Run workflow, and type the **version** (for example `0.5`). That version is put into the code for that run only, so the executable reports it without you editing anything, and the run builds, tests and uploads the executable as a workflow artifact. Tick **Publish** as well to also create the release `v<version>` (and its tag, on the commit that was run). Publish is off by default, and a version that already has a release is refused before the build starts.
+- **Run it by hand.** On GitHub go to Actions, Release, Run workflow, and type the **version** (for example `0.5`). That version is put into the code for that run only, so the executable reports it without you editing anything, and the run builds, tests and uploads each archive as a workflow artifact. Tick **Publish** as well to also create the release `v<version>` (and its tag, on the commit that was run). Publish is off by default, and a version that already has a release is refused before the build starts.
 
-To check a download: `sha256sum -c vpxconfig.sha256`.
+To check a download: `sha256sum -c vpxconfig-linux-x86_64.tar.gz.sha256`, or the arm64 one.
 
 ## Tests
 

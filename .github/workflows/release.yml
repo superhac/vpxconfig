@@ -25,8 +25,15 @@ permissions:
 
 jobs:
   build:
-    name: Build and test (Linux x86_64)
-    runs-on: ubuntu-22.04   # an older glibc, so the executable also runs on older distributions
+    name: Build and test (Linux ${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}   # an older glibc, so the executable also runs on older distributions
     outputs:
       tag: ${{ steps.ver.outputs.tag }}
     steps:
@@ -76,12 +83,19 @@ jobs:
         run: |
           bash tools/smoke_test_exe.sh dist/vpxconfig
 
+      - name: Pack the executable
+        env:
+          ARCHIVE: vpxconfig-linux-${{ matrix.arch }}.tar.gz
+        run: |
+          tar -czf "dist/$ARCHIVE" -C dist vpxconfig
+          (cd dist && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256")
+
       - uses: actions/upload-artifact@v7
         with:
-          name: vpxconfig-linux-x86_64
+          name: vpxconfig-linux-${{ matrix.arch }}
           path: |
-            dist/vpxconfig
-            dist/vpxconfig.sha256
+            dist/vpxconfig-linux-${{ matrix.arch }}.tar.gz
+            dist/vpxconfig-linux-${{ matrix.arch }}.tar.gz.sha256
           if-no-files-found: error
 
   release:
@@ -94,7 +108,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: vpxconfig-linux-x86_64
+          pattern: vpxconfig-linux-*
+          merge-multiple: true
           path: dist
 
       - name: Create the release
