@@ -15,12 +15,12 @@ writes a new ini file.
 
 ## Running the executable
 
-Each release has one file per architecture — `vpxconfig-linux-amd64` and `vpxconfig-linux-arm64` — that needs no Python. Download the one matching your machine, and the version is in the release's name and in `--version`:
+Each release has a single file, `vpxconfig` (Linux x86_64 only), that needs no Python. The version is in the release's name and in `--version`:
 
 ```
-chmod +x vpxconfig-linux-amd64      # or vpxconfig-linux-arm64
-./vpxconfig-linux-amd64             # then open http://localhost:1111 in Chrome
-./vpxconfig-linux-amd64 --version
+chmod +x vpxconfig
+./vpxconfig          # then open http://localhost:1111 in Chrome
+./vpxconfig --version
 ```
 
 `--host` and `--port` work as above. Stop it with Ctrl+C, or with the **Shut down** button at the bottom of the page's sidebar (it asks first; your answers are already saved as you type, but the ini file is only written when you click Write on the Review page). Next to the executable is a `.sha256` file to check the download. Because the executable unpacks itself into a temporary folder that is deleted when it exits, your answers are kept in `~/.config/vpxconfig/state.json` (or under `$XDG_CONFIG_HOME` if that is set) instead of next to the program. It is not signed.
@@ -93,18 +93,16 @@ tools/smoke_test_exe.sh dist/vpxconfig
 
 `tools/build.sh` installs PyInstaller (pinned in `requirements-build.txt`) into a virtual environment in `.venv/`, created on the first run, and never into the system Python. `vpxconfig.spec` says what is bundled: the `web/` folder and the base `VPinballX.ini`. The smoke test starts the executable with a throw-away home and config folder and checks the version, the pages, the wizard and where the answers are kept.
 
-`tools/build.sh` always produces `dist/vpxconfig`, for whatever machine it runs on — PyInstaller bundles a real interpreter, so it can't cross-compile. The release workflow runs it natively on both an amd64 and an arm64 runner and renames each result (see below).
-
 ## Versioning and releases
 
 The version is set in one place, `__version__` in `vpxconfig/__init__.py` (the first version is `0.5`). It is shown by `--version`, in the start-up message and in the page's sidebar. A release is named by a git tag `v<version>`, for example `v0.5`; the executable file itself is always just `vpxconfig`.
 
-The `Release` workflow (`.github/workflows/release.yml`) builds for two architectures — amd64 on `ubuntu-22.04` and arm64 on `ubuntu-22.04-arm` (both GitHub-hosted runners; an older Ubuntu so the executables run on older distributions too), each natively since PyInstaller can't cross-compile. It runs the unit tests, smoke tests the executable, and can publish a GitHub release with `vpxconfig-linux-amd64`, `vpxconfig-linux-arm64`, their `.sha256` files and generated release notes. Linux only: the wizard uses Linux tools (`wayland-info`) and VPX's Linux settings location. There are two ways to run it:
+The `Release` workflow (`.github/workflows/release.yml`) builds on Ubuntu 22.04 (an older glibc, so the executable runs on older distributions too), runs the unit tests, smoke tests the executable, and can publish a GitHub release with `vpxconfig`, `vpxconfig.sha256` and generated release notes. Only Linux x86_64 is built: the wizard uses Linux tools (`wayland-info`) and VPX's Linux settings location. There are two ways to run it:
 
 - **Push a tag.** Set `__version__` (skip this for `0.5`, which is already set), commit, then `git tag v0.5 && git push origin v0.5`. The workflow first checks that the tag matches `__version__`; a mismatch fails before anything is built. It then builds and publishes the release.
-- **Run it by hand.** On GitHub go to Actions, Release, Run workflow, and type the **version** (for example `0.5`). That version is put into the code for that run only, so each executable reports it without you editing anything, and the run builds, tests and uploads both architectures as workflow artifacts. Tick **Publish** as well to also create the release `v<version>` (and its tag, on the commit that was run). Publish is off by default, and a version that already has a release is refused before the build starts.
+- **Run it by hand.** On GitHub go to Actions, Release, Run workflow, and type the **version** (for example `0.5`). That version is put into the code for that run only, so the executable reports it without you editing anything, and the run builds, tests and uploads the executable as a workflow artifact. Tick **Publish** as well to also create the release `v<version>` (and its tag, on the commit that was run). Publish is off by default, and a version that already has a release is refused before the build starts.
 
-To check a download: `sha256sum -c vpxconfig-linux-amd64.sha256` (or the `arm64` equivalent).
+To check a download: `sha256sum -c vpxconfig.sha256`.
 
 ## Tests
 
